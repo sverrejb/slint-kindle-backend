@@ -1,11 +1,18 @@
 [package]
 name = "slint-backend-kindle"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
+rust-version = "1.85"
 description = "Slint platform backend for Kindle E-ink devices (mxc_epdc_fb framebuffer + cyttsp4 touch)"
+authors = ["Sverre Johann Bjørke <sverre.bjorke@sikt.no>"]
 license = "MIT OR Apache-2.0"
+readme = "README.md"
+repository = "https://github.com/sverrejb/slint-kindle-backend"
+homepage = "https://github.com/sverrejb/slint-kindle-backend"
+documentation = "https://docs.rs/slint-backend-kindle"
 keywords = ["slint", "kindle", "embedded", "eink", "framebuffer"]
 categories = ["embedded", "gui"]
+exclude = ["*.JPG", "*.jpg", "*.png"]
 
 [dependencies]
 slint = { version = "1.16", default-features = false, features = ["compat-1-2", "std", "renderer-software"] }
