@@ -5,6 +5,8 @@ Slint backend for jailbroken Kindles. Allows for running Slint GUIS on Kindle de
 > ⚠️ **Experimental crate: limited device support.**
 > This crate is experimental and has so far only been tested on the Kindle Paperwhite 7th gen. (PW3) with firmware 5.16.2.1.1. The framebuffer, screen resoulution, touch input etc might differ beteween models. Please file an issue (or a PR) if you try it on different hardware!
 
+![](kindle.JPG)
+
 ## Usage
 
 Add the crate to your app:
