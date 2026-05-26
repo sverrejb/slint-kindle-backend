@@ -1,0 +1,17 @@
+[package]
+name = "slint-backend-kindle"
+version = "0.1.0"
+edition = "2024"
+description = "Slint platform backend for Kindle E-ink devices (mxc_epdc_fb framebuffer + cyttsp4 touch)"
+license = "MIT OR Apache-2.0"
+keywords = ["slint", "kindle", "embedded", "eink", "framebuffer"]
+categories = ["embedded", "gui"]
+
+[dependencies]
+slint = { version = "1.16", default-features = false, features = ["compat-1-2", "std", "renderer-software"] }
+libc = "0.2"
+# Pulled in transitively by slint (fontique via i-slint-common/parley, fontdb
+# via usvg/resvg). Their default features link to libfontconfig, which isn't in
+# the musl cross-compile sysroot so we re-declare them here to strip that.
+fontique = { version = "0.8", default-features = false, features = ["std", "fontconfig-dlopen"] }
+fontdb = { version = "0.23", default-features = false, features = ["std", "fs", "memmap"] }

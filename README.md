@@ -1,0 +1,71 @@
+# Slint backend for Kindle
+
+Slint backend for jailbroken Kindles. Allows for running Slint GUIS on Kindle devices.
+
+> ⚠️ **Experimental crate: limited device support.**
+> This crate is experimental and has so far only been tested on the Kindle Paperwhite 7th gen. (PW3) with firmware 5.16.2.1.1. The framebuffer, screen resoulution, touch input etc might differ beteween models. Please file an issue (or a PR) if you try it on different hardware!
+
+## Usage
+
+Add the crate to your app:
+
+```toml
+[dependencies]
+slint = { version = "1.16", default-features = false, features = ["compat-1-2", "std", "renderer-software"] }
+slint-backend-kindle = "0.1"
+```
+
+Bundle a TTF/OTF font with your app and pass it to `install()` at startup. **The font is required**. The various Kindle models has no fontconfig and no default location for system fonts, so Slint's software renderer would panic on the first fallback query without one.
+
+```rust
+slint::include_modules!();
+
+static FONT: &[u8] = include_bytes!("../fonts/LiberationSans-Regular.ttf");
+
+fn main() {
+    slint_backend_kindle::install(FONT).expect("failed to install Kindle backend");
+    let app = AppWindow::new().expect("failed to create window");
+    app.run().expect("event loop error");
+}
+```
+
+The font becomes the default, so Slint widgets that don't specify `font-family` render correctly. You can still reference the font by its real family name in your `.slint` files (e.g. `font-family: "Liberation Sans"`).
+
+### Additional fonts
+
+`install()` returns a `KindleBackend` handle. To use more than one typeface, register the extras on the handle **after** constructing the window:
+
+```rust
+static DEFAULT_FONT: &[u8] = include_bytes!("../fonts/LiberationSans-Regular.ttf");
+static FANCY_FONT: &[u8] = include_bytes!("../fonts/DancingScript-Regular.ttf");
+
+fn main() {
+    let backend = slint_backend_kindle::install(DEFAULT_FONT)
+        .expect("failed to install Kindle backend");
+    let app = AppWindow::new().expect("failed to create window");
+    backend.register_font_from_memory(FANCY_FONT)
+        .expect("failed to register font");
+    app.run().expect("event loop error");
+}
+```
+
+Reference each font in `.slint` by its **real family name** (the one in the font's `name` table), not the filename. `DancingScript-Regular.ttf` for instance reports itself as `"Dancing Script"`, so the .slint must say `font-family: "Dancing Script"`. If a glyph fails to render, that mismatch is the first thing to check — `fc-query font.ttf` or `otfinfo --info font.ttf` will show the family string the font advertises.
+
+## Cross-compiling for the Kindle
+
+The Kindle runs an ARMv7 musl userland. Recommended toolchain:
+
+```sh
+rustup target add armv7-unknown-linux-musleabihf
+cargo install cargo-zigbuild
+# brew install zig    # or your platform's equivalent
+
+cargo zigbuild --release --target armv7-unknown-linux-musleabihf
+```
+
+The resulting binary is statically linked against musl and runs directly on the device.
+
+# Roadmap
+* Examples
+* Better device support
+* Font discovery instead of hard coded default
