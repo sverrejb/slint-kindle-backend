@@ -12,15 +12,10 @@ use crate::framebuffer::{Framebuffer, DISPLAY_HEIGHT, DISPLAY_WIDTH};
 use crate::touch::TouchInput;
 
 
-struct KindleLineBuffer<'fb> {
-    fb: &'fb mut Framebuffer,
-    scratch: Vec<Rgb8Pixel>,
-}
-
-impl<'fb> KindleLineBuffer<'fb> {
-    fn new(fb: &'fb mut Framebuffer) -> Self {
-        Self { fb, scratch: vec![Rgb8Pixel::default(); DISPLAY_WIDTH as usize] }
-    }
+struct KindleLineBuffer<'a> {
+    fb: &'a mut Framebuffer,
+    rgb_scratch: &'a mut [Rgb8Pixel],
+    gray_scratch: &'a mut [u8],
 }
 
 impl LineBufferProvider for KindleLineBuffer<'_> {
@@ -32,16 +27,16 @@ impl LineBufferProvider for KindleLineBuffer<'_> {
         range: Range<usize>,
         render_fn: impl FnOnce(&mut [Self::TargetPixel]),
     ) {
-        let buf = &mut self.scratch[range.clone()];
-        render_fn(buf);
+        let rgb = &mut self.rgb_scratch[range.clone()];
+        render_fn(rgb);
 
         // The E-ink screen only shows grayscale, so turn each RGB pixel into a single gray value.
-        let gray: Vec<u8> = buf
-            .iter()
-            .map(|p| (0.299 * p.r as f32 + 0.587 * p.g as f32 + 0.114 * p.b as f32) as u8)
-            .collect();
+        let gray = &mut self.gray_scratch[range.clone()];
+        for (g, p) in gray.iter_mut().zip(rgb.iter()) {
+            *g = (0.299 * p.r as f32 + 0.587 * p.g as f32 + 0.114 * p.b as f32) as u8;
+        }
 
-        self.fb.write_line(line, range, &gray);
+        self.fb.write_line(line, range, gray);
     }
 }
 
@@ -77,13 +72,20 @@ impl Platform for KindlePlatform {
         fb.fill(0xff);
         fb.refresh_full();
 
+        let mut rgb_scratch = vec![Rgb8Pixel::default(); DISPLAY_WIDTH as usize];
+        let mut gray_scratch = vec![0u8; DISPLAY_WIDTH as usize];
+
         loop {
             touch.poll(&self.window);
 
             slint::platform::update_timers_and_animations();
 
             self.window.draw_if_needed(|renderer| {
-                let dirty = renderer.render_by_line(KindleLineBuffer::new(&mut fb));
+                let dirty = renderer.render_by_line(KindleLineBuffer {
+                    fb: &mut fb,
+                    rgb_scratch: &mut rgb_scratch,
+                    gray_scratch: &mut gray_scratch,
+                });
                 fb.refresh_region(dirty.bounding_box_origin(), dirty.bounding_box_size());
             });
 
