@@ -1,21 +1,23 @@
 import { VerticalBox, HorizontalBox } from "std-widgets.slint";
 
+// Counter demo — all sizes are proportional to the window dimensions so the
+// layout works on any Kindle (600×800 Touch, 1072×1448 Paperwhite, etc.).
+// The platform backend sets the window size from the framebuffer geometry.
 export component AppWindow inherits Window {
-    width: 1072px;
-    height: 1448px;
     background: white;
 
     in-out property <int> count: 0;
     callback quit();
 
+    // Quit button — top-right corner, 10% of width square
     Rectangle {
-        x: root.width - self.width - 30px;
-        y: 30px;
-        width: 120px;
-        height: 120px;
-        border-width: 6px;
+        x: root.width - self.width - root.width * 0.03;
+        y: root.height * 0.02;
+        width: root.width * 0.1;
+        height: root.width * 0.1;
+        border-width: root.width * 0.005;
         border-color: black;
-        border-radius: 16px;
+        border-radius: root.width * 0.015;
         background: quit-touch.pressed ? #cccccc : white;
 
         quit-touch := TouchArea {
@@ -24,7 +26,7 @@ export component AppWindow inherits Window {
 
         Text {
             text: "×";
-            font-size: 72px;
+            font-size: root.width * 0.06;
             color: black;
             horizontal-alignment: center;
             vertical-alignment: center;
@@ -33,25 +35,27 @@ export component AppWindow inherits Window {
 
     VerticalBox {
         alignment: center;
-        spacing: 80px;
+        spacing: root.height * 0.06;  // 6% of height between elements
 
+        // Counter value — 15% of width for readable text
         Text {
             text: "count: " + root.count;
-            font-size: 200px;
+            font-size: root.width * 0.15;
             color: black;
             horizontal-alignment: center;
         }
 
         HorizontalBox {
             alignment: center;
-            spacing: 40px;
+            spacing: root.width * 0.04;  // 4% gap between buttons
 
+            // Decrement button — 40% width × 14% height
             Rectangle {
-                width: 450px;
-                height: 200px;
-                border-width: 6px;
+                width: root.width * 0.4;
+                height: root.height * 0.14;
+                border-width: root.width * 0.005;
                 border-color: black;
-                border-radius: 16px;
+                border-radius: root.width * 0.015;
                 background: dec-touch.pressed ? #cccccc : white;
 
                 dec-touch := TouchArea {
@@ -60,19 +64,20 @@ export component AppWindow inherits Window {
 
                 Text {
                     text: "-1";
-                    font-size: 48px;
+                    font-size: root.width * 0.06;
                     color: black;
                     horizontal-alignment: center;
                     vertical-alignment: center;
                 }
             }
 
+            // Increment button — 40% width × 14% height
             Rectangle {
-                width: 450px;
-                height: 200px;
-                border-width: 6px;
+                width: root.width * 0.4;
+                height: root.height * 0.14;
+                border-width: root.width * 0.005;
                 border-color: black;
-                border-radius: 16px;
+                border-radius: root.width * 0.015;
                 background: inc-touch.pressed ? #cccccc : white;
 
                 inc-touch := TouchArea {
@@ -81,7 +86,7 @@ export component AppWindow inherits Window {
 
                 Text {
                     text: "+1";
-                    font-size: 48px;
+                    font-size: root.width * 0.06;
                     color: black;
                     horizontal-alignment: center;
                     vertical-alignment: center;
