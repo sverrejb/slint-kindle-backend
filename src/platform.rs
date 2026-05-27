@@ -31,9 +31,10 @@ impl LineBufferProvider for KindleLineBuffer<'_> {
         render_fn(rgb);
 
         // The E-ink screen only shows grayscale, so turn each RGB pixel into a single gray value.
+        // BT.601 luma weights (0.299, 0.587, 0.114) scaled by 256 — sum is 256 so the divide is a shift.
         let gray = &mut self.gray_scratch[range.clone()];
         for (g, p) in gray.iter_mut().zip(rgb.iter()) {
-            *g = (0.299 * p.r as f32 + 0.587 * p.g as f32 + 0.114 * p.b as f32) as u8;
+            *g = ((77 * p.r as u32 + 150 * p.g as u32 + 29 * p.b as u32) >> 8) as u8;
         }
 
         self.fb.write_line(line, range, gray);

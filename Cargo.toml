@@ -1,6 +1,6 @@
 [package]
 name = "slint-backend-kindle"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2024"
 rust-version = "1.85"
 description = "Slint platform backend for Kindle E-ink devices (mxc_epdc_fb framebuffer + cyttsp4 touch)"
