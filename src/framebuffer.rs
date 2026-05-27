@@ -8,8 +8,11 @@ use std::ops::Range;
 use std::os::fd::AsRawFd;
 
 // Standard Linux framebuffer ioctl numbers (see <linux/fb.h>).
-const FBIOGET_VSCREENINFO: libc::Ioctl = 0x4600;
-const FBIOGET_FSCREENINFO: libc::Ioctl = 0x4602;
+// Typed as c_ulong (not libc::Ioctl) so the crate still type-checks on
+// non-Linux dev hosts where libc::Ioctl isn't defined; `as _` at the call
+// site coerces to whatever the platform's ioctl request type is.
+const FBIOGET_VSCREENINFO: libc::c_ulong = 0x4600;
+const FBIOGET_FSCREENINFO: libc::c_ulong = 0x4602;
 
 // These structs mirror the kernel's `fb_var_screeninfo` and `fb_fix_screeninfo`.
 // We only read from them - the fields we care about are `xres`, `yres` (visible
@@ -112,7 +115,7 @@ struct UpdateRequest {
 
 // Kindle EPDC (Electrophoretic Display Controller) ioctl and constants.
 // The ioctl number was confirmed by stracing `eips` on a real device.
-const MXCFB_SEND_UPDATE: libc::Ioctl = 0x4048_462e;
+const MXCFB_SEND_UPDATE: libc::c_ulong = 0x4048_462e;
 
 const WAVEFORM_MODE_GC16: u32 = 2; // Full 16-level grayscale refresh (slow, high quality)
 const WAVEFORM_MODE_AUTO: u32 = 257; // Let the driver pick the best waveform
@@ -154,7 +157,7 @@ impl Framebuffer {
         if unsafe {
             libc::ioctl(
                 fd,
-                FBIOGET_VSCREENINFO,
+                FBIOGET_VSCREENINFO as _,
                 &mut vinfo as *mut _ as *mut libc::c_void,
             )
         } == -1
@@ -166,7 +169,7 @@ impl Framebuffer {
         if unsafe {
             libc::ioctl(
                 fd,
-                FBIOGET_FSCREENINFO,
+                FBIOGET_FSCREENINFO as _,
                 &mut finfo as *mut _ as *mut libc::c_void,
             )
         } == -1
@@ -260,7 +263,7 @@ impl Framebuffer {
         unsafe {
             libc::ioctl(
                 self.file.as_raw_fd(),
-                MXCFB_SEND_UPDATE,
+                MXCFB_SEND_UPDATE as _,
                 &update as *const _,
             );
         }
