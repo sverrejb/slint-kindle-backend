@@ -1,0 +1,43 @@
+export component AppWindow inherits Window {
+    width: 1072px;
+    height: 1448px;
+    background: white;
+
+    in property <string> time-text: "--:--";
+    callback quit();
+
+    Text {
+        x: 0;
+        y: 0;
+        width: parent.width;
+        height: parent.height;
+        text: root.time-text;
+        font-size: 400px;
+        color: black;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    Rectangle {
+        x: parent.width - self.width - 30px;
+        y: 30px;
+        width: 120px;
+        height: 120px;
+        border-width: 6px;
+        border-color: black;
+        border-radius: 16px;
+        background: quit-touch.pressed ? #cccccc : white;
+
+        quit-touch := TouchArea {
+            clicked => { root.quit(); }
+        }
+
+        Text {
+            text: "×";
+            font-size: 72px;
+            color: black;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+}

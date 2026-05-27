@@ -17,3 +17,5 @@ Thumbs.db
 # Local deploy scripts (not yet ready to commit)
 examples/simple/launch.sh
 examples/simple/deploy-mac.sh
+examples/clock/launch.sh
+examples/clock/deploy-mac.sh
