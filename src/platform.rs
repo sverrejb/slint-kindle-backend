@@ -90,11 +90,18 @@ impl Platform for KindlePlatform {
                 fb.refresh_region(dirty.bounding_box_origin(), dirty.bounding_box_size());
             });
 
-            if !self.window.has_active_animations() {
-                let sleep = slint::platform::duration_until_next_timer_update()
-                    .unwrap_or(Duration::from_millis(16));
-                std::thread::sleep(sleep.min(Duration::from_millis(16)));
-            }
+            // Cap sleep tighter during animations so they stay smooth, but never skip sleeping —
+            // the E-ink panel can't refresh faster than its waveform (~150 ms), so a busy loop
+            // just burns battery without producing extra frames.
+            let max_sleep = if self.window.has_active_animations() {
+                Duration::from_millis(33)
+            } else {
+                Duration::from_millis(100)
+            };
+            let sleep = slint::platform::duration_until_next_timer_update()
+                .unwrap_or(max_sleep)
+                .min(max_sleep);
+            std::thread::sleep(sleep);
         }
     }
 }
