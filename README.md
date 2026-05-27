@@ -3,7 +3,7 @@
 Slint backend for jailbroken Kindles. Allows for running Slint GUIS on Kindle devices.
 
 > ⚠️ **Experimental crate: limited device support.**
-> This crate is experimental and has so far only been tested on the Kindle Paperwhite 7th gen. (PW3) with firmware 5.16.2.1.1. The framebuffer, screen resoulution, touch input etc might differ beteween models. Please file an issue (or a PR) if you try it on different hardware!
+> This crate is experimental and has not been tested on a wide variety of Kindle devices. See "Tested devices" further down. Please file an issue (or a PR) if you try it on different hardware!
 
 ![Slint app running on a Kindle Paperwhite](https://raw.githubusercontent.com/sverrejb/slint-kindle-backend/main/kindle.JPG)
 
@@ -67,7 +67,13 @@ cargo zigbuild --release --target armv7-unknown-linux-musleabihf
 
 The resulting binary is statically linked against musl and runs directly on the device.
 
-# Roadmap
+## Tested devices
+So far, the backend has been tested to work on:
+* Kindle Paperwhite 7th gen.
+* Kindle Touch 4th gen
+ 
+
+## Roadmap
 * Examples
 * Better device support
 * Font discovery instead of hard coded default
