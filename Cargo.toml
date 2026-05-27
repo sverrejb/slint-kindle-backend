@@ -12,7 +12,10 @@ homepage = "https://github.com/sverrejb/slint-kindle-backend"
 documentation = "https://docs.rs/slint-backend-kindle"
 keywords = ["slint", "kindle", "embedded", "eink", "framebuffer"]
 categories = ["embedded", "gui"]
-exclude = ["*.JPG", "*.jpg", "*.png"]
+exclude = ["*.JPG", "*.jpg", "*.png", "examples"]
+
+[workspace]
+members = ["examples/*"]
 
 [dependencies]
 slint = { version = "1.16", default-features = false, features = ["compat-1-2", "std", "renderer-software"] }

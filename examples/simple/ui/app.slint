@@ -1,0 +1,92 @@
+import { VerticalBox, HorizontalBox } from "std-widgets.slint";
+
+export component AppWindow inherits Window {
+    width: 1072px;
+    height: 1448px;
+    background: white;
+
+    in-out property <int> count: 0;
+    callback quit();
+
+    Rectangle {
+        x: root.width - self.width - 30px;
+        y: 30px;
+        width: 120px;
+        height: 120px;
+        border-width: 6px;
+        border-color: black;
+        border-radius: 16px;
+        background: quit-touch.pressed ? #cccccc : white;
+
+        quit-touch := TouchArea {
+            clicked => { root.quit(); }
+        }
+
+        Text {
+            text: "×";
+            font-size: 72px;
+            color: black;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+
+    VerticalBox {
+        alignment: center;
+        spacing: 80px;
+
+        Text {
+            text: "count: " + root.count;
+            font-size: 200px;
+            color: black;
+            horizontal-alignment: center;
+        }
+
+        HorizontalBox {
+            alignment: center;
+            spacing: 40px;
+
+            Rectangle {
+                width: 450px;
+                height: 200px;
+                border-width: 6px;
+                border-color: black;
+                border-radius: 16px;
+                background: dec-touch.pressed ? #cccccc : white;
+
+                dec-touch := TouchArea {
+                    clicked => { root.count -= 1; }
+                }
+
+                Text {
+                    text: "-1";
+                    font-size: 48px;
+                    color: black;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+
+            Rectangle {
+                width: 450px;
+                height: 200px;
+                border-width: 6px;
+                border-color: black;
+                border-radius: 16px;
+                background: inc-touch.pressed ? #cccccc : white;
+
+                inc-touch := TouchArea {
+                    clicked => { root.count += 1; }
+                }
+
+                Text {
+                    text: "+1";
+                    font-size: 48px;
+                    color: black;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+        }
+    }
+}
