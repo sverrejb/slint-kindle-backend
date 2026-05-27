@@ -1,31 +1,34 @@
+// Clock display — all sizes are proportional to the window dimensions so the
+// layout works on any Kindle (600×800 Touch, 1072×1448 Paperwhite, etc.).
+// The platform backend sets the window size from the framebuffer geometry.
 export component AppWindow inherits Window {
-    width: 1072px;
-    height: 1448px;
     background: white;
 
     in property <string> time-text: "--:--";
     callback quit();
 
+    // Main time display — 20% of screen width gives a comfortable fit for "HH:MM"
     Text {
         x: 0;
         y: 0;
         width: parent.width;
         height: parent.height;
         text: root.time-text;
-        font-size: 400px;
+        font-size: root.width * 0.2;
         color: black;
         horizontal-alignment: center;
         vertical-alignment: center;
     }
 
+    // Quit button — top-right corner, 10% of width square
     Rectangle {
-        x: parent.width - self.width - 30px;
-        y: 30px;
-        width: 120px;
-        height: 120px;
-        border-width: 6px;
+        x: parent.width - self.width - root.width * 0.03;
+        y: root.height * 0.02;
+        width: root.width * 0.1;
+        height: root.width * 0.1;
+        border-width: root.width * 0.005;
         border-color: black;
-        border-radius: 16px;
+        border-radius: root.width * 0.015;
         background: quit-touch.pressed ? #cccccc : white;
 
         quit-touch := TouchArea {
@@ -34,7 +37,7 @@ export component AppWindow inherits Window {
 
         Text {
             text: "×";
-            font-size: 72px;
+            font-size: root.width * 0.06;
             color: black;
             horizontal-alignment: center;
             vertical-alignment: center;
