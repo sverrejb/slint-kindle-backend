@@ -72,7 +72,7 @@ impl Platform for KindlePlatform {
         self.window
             .set_size(slint::PhysicalSize::new(fb.width, fb.height));
 
-        let mut touch = TouchInput::open()
+        let mut touch = TouchInput::open(fb.width, fb.height)
             .map_err(|e| PlatformError::Other(format!("failed to open touch input: {e}")))?;
 
         fb.fill(0xff);
