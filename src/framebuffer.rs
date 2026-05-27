@@ -95,15 +95,8 @@ impl Framebuffer {
     }
 
     pub(crate) fn fill(&mut self, value: u8) {
-        for y in 0..DISPLAY_HEIGHT as usize {
-            let dst = unsafe {
-                std::slice::from_raw_parts_mut(
-                    self.map.add(y * FB_STRIDE),
-                    DISPLAY_WIDTH as usize,
-                )
-            };
-            dst.fill(value);
-        }
+        let dst = unsafe { std::slice::from_raw_parts_mut(self.map, self.len) };
+        dst.fill(value);
     }
 
     fn send_update(&self, region: UpdateRect, waveform: u32, mode: u32) {
