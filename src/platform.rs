@@ -2,15 +2,14 @@ use std::ops::Range;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
+use slint::Rgb8Pixel;
 use slint::platform::software_renderer::{
     LineBufferProvider, MinimalSoftwareWindow, RepaintBufferType,
 };
 use slint::platform::{Platform, PlatformError, WindowAdapter};
-use slint::Rgb8Pixel;
 
-use crate::framebuffer::{Framebuffer, DISPLAY_HEIGHT, DISPLAY_WIDTH};
+use crate::framebuffer::Framebuffer;
 use crate::touch::TouchInput;
-
 
 struct KindleLineBuffer<'a> {
     fb: &'a mut Framebuffer,
@@ -49,8 +48,11 @@ pub(crate) struct KindlePlatform {
 impl KindlePlatform {
     pub(crate) fn new() -> Self {
         let window = MinimalSoftwareWindow::new(RepaintBufferType::ReusedBuffer);
-        window.set_size(slint::PhysicalSize::new(DISPLAY_WIDTH, DISPLAY_HEIGHT));
-        Self { window, start: Instant::now() }
+        // Window size is set later once we know the actual display dimensions.
+        Self {
+            window,
+            start: Instant::now(),
+        }
     }
 }
 
@@ -67,14 +69,17 @@ impl Platform for KindlePlatform {
         let mut fb = Framebuffer::open()
             .map_err(|e| PlatformError::Other(format!("failed to open /dev/fb0: {e}")))?;
 
+        self.window
+            .set_size(slint::PhysicalSize::new(fb.width, fb.height));
+
         let mut touch = TouchInput::open()
             .map_err(|e| PlatformError::Other(format!("failed to open touch input: {e}")))?;
 
         fb.fill(0xff);
         fb.refresh_full();
 
-        let mut rgb_scratch = vec![Rgb8Pixel::default(); DISPLAY_WIDTH as usize];
-        let mut gray_scratch = vec![0u8; DISPLAY_WIDTH as usize];
+        let mut rgb_scratch = vec![Rgb8Pixel::default(); fb.width as usize];
+        let mut gray_scratch = vec![0u8; fb.width as usize];
 
         loop {
             touch.poll(&self.window);
