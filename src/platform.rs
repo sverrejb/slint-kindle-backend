@@ -38,7 +38,7 @@ impl LineBufferProvider for KindleLineBuffer<'_> {
         render_fn(rgb);
 
         // The E-ink screen only shows grayscale, so turn each RGB pixel into a single gray value.
-        // BT.601 luma weights (0.299, 0.587, 0.114) scaled by 256 — sum is 256 so the divide is a shift.
+        // BT.601 luma weights (0.299, 0.587, 0.114) scaled by 256 and bitshifted to devide by 256.
         let gray = &mut self.gray_scratch[range.clone()];
         for (g, p) in gray.iter_mut().zip(rgb.iter()) {
             *g = ((77 * p.r as u32 + 150 * p.g as u32 + 29 * p.b as u32) >> 8) as u8;
@@ -88,25 +88,25 @@ impl Platform for KindlePlatform {
     }
 
     fn run_event_loop(&self) -> Result<(), PlatformError> {
-        let mut fb = Framebuffer::open()
+        let mut frame_buffer = Framebuffer::open()
             .map_err(|e| PlatformError::Other(format!("failed to open /dev/fb0: {e}")))?;
 
         self.window
-            .set_size(slint::PhysicalSize::new(fb.width, fb.height));
+            .set_size(slint::PhysicalSize::new(frame_buffer.width, frame_buffer.height));
 
-        let mut touch = TouchInput::open(fb.width, fb.height)
+        let mut touch_input = TouchInput::open(frame_buffer.width, frame_buffer.height)
             .map_err(|e| PlatformError::Other(format!("failed to open touch input: {e}")))?;
 
-        fb.fill(0xff);
-        fb.refresh_full();
+        frame_buffer.fill(0xff);
+        frame_buffer.refresh_full();
 
-        let mut rgb_scratch = vec![Rgb8Pixel::default(); fb.width as usize];
-        let mut gray_scratch = vec![0u8; fb.width as usize];
+        let mut rgb_scratch = vec![Rgb8Pixel::default(); frame_buffer.width as usize];
+        let mut gray_scratch = vec![0u8; frame_buffer.width as usize];
 
         let wakeup_read_fd = self.wakeup.read.as_raw_fd();
 
         loop {
-            // Wait for something to happen like a touch, a wakeup poke, or a timer.
+            // Wait for touch event or wakeup from application thread.
             // -1 means "wait forever," which lets the CPU go to sleep.
             let timeout_ms: libc::c_int = match (
                 self.window.has_active_animations(),
@@ -118,9 +118,11 @@ impl Platform for KindlePlatform {
                 (false, None) => -1,
             };
 
-            let mut fds = [
+            // [0] - touch events file descriptor
+            // [1] - wakeup pipe for userland application threads
+            let mut file_descriptors = [
                 libc::pollfd {
-                    fd: touch.fd(),
+                    fd: touch_input.fd(),
                     events: libc::POLLIN,
                     revents: 0,
                 },
@@ -131,9 +133,12 @@ impl Platform for KindlePlatform {
                 },
             ];
 
+            // Block until an fd has activity or the timeout expires. Retry on
+            // signals (EINTR), bail on any other error.
             // SAFETY: fds is a valid 2-element array while poll runs.
-            let rc = unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as libc::nfds_t, timeout_ms) };
-            if rc < 0 {
+            let poll_result =
+                unsafe { libc::poll(file_descriptors.as_mut_ptr(), file_descriptors.len() as libc::nfds_t, timeout_ms) };
+            if poll_result < 0 {
                 let err = std::io::Error::last_os_error();
                 if err.raw_os_error() == Some(libc::EINTR) {
                     continue;
@@ -141,19 +146,18 @@ impl Platform for KindlePlatform {
                 return Err(PlatformError::Other(format!("poll failed: {err}")));
             }
 
-            // If either fd has died, bail — otherwise poll keeps returning instantly
-            // and we'd burn the CPU forever waiting for input that's never coming.
+            // Bail if either file descriptor has died to avoid waiting forever on input
             let err_bits = libc::POLLERR | libc::POLLHUP | libc::POLLNVAL;
-            if (fds[0].revents | fds[1].revents) & err_bits != 0 {
+            if (file_descriptors[0].revents | file_descriptors[1].revents) & err_bits != 0 {
                 return Err(PlatformError::Other(format!(
                     "poll: input fd died (touch revents={:#x}, wakeup revents={:#x})",
-                    fds[0].revents, fds[1].revents
+                    file_descriptors[0].revents, file_descriptors[1].revents
                 )));
             }
 
             // Empty the pipe before running closures so any new wakeup that arrives
             // while a closure runs still triggers another loop iteration.
-            if fds[1].revents & libc::POLLIN != 0 {
+            if file_descriptors[1].revents & libc::POLLIN != 0 {
                 wakeup::drain(&self.wakeup.read);
                 let pending: Vec<_> = self
                     .queue
@@ -172,16 +176,16 @@ impl Platform for KindlePlatform {
                 break;
             }
 
-            touch.poll(&self.window);
+            touch_input.poll(&self.window);
             slint::platform::update_timers_and_animations();
 
             self.window.draw_if_needed(|renderer| {
                 let dirty = renderer.render_by_line(KindleLineBuffer {
-                    fb: &mut fb,
+                    fb: &mut frame_buffer,
                     rgb_scratch: &mut rgb_scratch,
                     gray_scratch: &mut gray_scratch,
                 });
-                fb.refresh_region(dirty.bounding_box_origin(), dirty.bounding_box_size());
+                frame_buffer.refresh_region(dirty.bounding_box_origin(), dirty.bounding_box_size());
             });
         }
 

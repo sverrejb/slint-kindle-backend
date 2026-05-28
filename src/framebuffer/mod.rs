@@ -1,127 +1,13 @@
-//! Linux framebuffer interface for Kindle e-ink displays.
-//!
-//! Opens `/dev/fb0`, queries the kernel for the actual screen geometry (so we
-//! work on any Kindle model), mmaps the pixel buffer, and issues EPDC refresh
-//! ioctls to push changes to the e-ink panel.
+mod ffi;
 
 use std::ops::Range;
 use std::os::fd::AsRawFd;
 
-// Standard Linux framebuffer ioctl numbers (see <linux/fb.h>).
-// Typed as c_ulong (not libc::Ioctl) so the crate still type-checks on
-// non-Linux dev hosts where libc::Ioctl isn't defined; `as _` at the call
-// site coerces to whatever the platform's ioctl request type is.
-const FBIOGET_VSCREENINFO: libc::c_ulong = 0x4600;
-const FBIOGET_FSCREENINFO: libc::c_ulong = 0x4602;
-
-// These structs mirror the kernel's `fb_var_screeninfo` and `fb_fix_screeninfo`.
-// We only read from them - the fields we care about are `xres`, `yres` (visible
-// resolution) and `line_length` (stride in bytes per row, which may be larger
-// than xres due to alignment padding).
-
-#[repr(C)]
-#[derive(Default)]
-struct FbBitfield {
-    offset: u32,
-    length: u32,
-    msb_right: u32,
-}
-
-#[repr(C)]
-#[derive(Default)]
-struct FbVarScreeninfo {
-    xres: u32,
-    yres: u32,
-    xres_virtual: u32,
-    yres_virtual: u32,
-    xoffset: u32,
-    yoffset: u32,
-    bits_per_pixel: u32,
-    grayscale: u32,
-    red: FbBitfield,
-    green: FbBitfield,
-    blue: FbBitfield,
-    transp: FbBitfield,
-    nonstd: u32,
-    activate: u32,
-    height: u32,
-    width: u32,
-    accel_flags: u32,
-    pixclock: u32,
-    left_margin: u32,
-    right_margin: u32,
-    upper_margin: u32,
-    lower_margin: u32,
-    hsync_len: u32,
-    vsync_len: u32,
-    sync: u32,
-    vmode: u32,
-    rotate: u32,
-    colorspace: u32,
-    reserved: [u32; 4],
-}
-
-#[repr(C)]
-#[derive(Default)]
-struct FbFixScreeninfo {
-    id: [u8; 16],
-    smem_start: libc::c_ulong,
-    smem_len: u32,
-    type_: u32,
-    type_aux: u32,
-    visual: u32,
-    xpanstep: u16,
-    ypanstep: u16,
-    ywrapstep: u16,
-    line_length: u32,
-    mmio_start: libc::c_ulong,
-    mmio_len: u32,
-    accel: u32,
-    capabilities: u16,
-    reserved: [u16; 2],
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub(crate) struct UpdateRect {
-    pub top: u32,
-    pub left: u32,
-    pub width: u32,
-    pub height: u32,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-struct AlternateBuffer {
-    physical_address: u32,
-    width: u32,
-    height: u32,
-    update_region: UpdateRect,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-struct UpdateRequest {
-    update_region: UpdateRect,
-    waveform_mode: u32,
-    update_mode: u32,
-    update_marker: u32,
-    previous_bw_waveform_mode: u32,
-    previous_gray_waveform_mode: u32,
-    temperature: i32,
-    flags: u32,
-    alternate_buffer: AlternateBuffer,
-}
-
-// Kindle EPDC (Electrophoretic Display Controller) ioctl and constants.
-// The ioctl number was confirmed by stracing `eips` on a real device.
-const MXCFB_SEND_UPDATE: libc::c_ulong = 0x4048_462e;
-
-const WAVEFORM_MODE_GC16: u32 = 2; // Full 16-level grayscale refresh (slow, high quality)
-const WAVEFORM_MODE_AUTO: u32 = 257; // Let the driver pick the best waveform
-const UPDATE_MODE_PARTIAL: u32 = 0; // Only redraw the dirty region
-const UPDATE_MODE_FULL: u32 = 1; // Flash the whole screen (clears ghosting)
-const TEMP_USE_AMBIENT: i32 = 0x1000; // Use the panel's ambient temperature sensor
+use ffi::{
+    AlternateBuffer, FBIOGET_FSCREENINFO, FBIOGET_VSCREENINFO, FbFixScreeninfo, FbVarScreeninfo,
+    MXCFB_SEND_UPDATE, TEMP_USE_AMBIENT, UPDATE_MODE_FULL, UPDATE_MODE_PARTIAL, UpdateRect,
+    UpdateRequest, WAVEFORM_MODE_AUTO, WAVEFORM_MODE_GC16,
+};
 
 /// Memory-mapped handle to the Kindle's e-ink framebuffer.
 ///
@@ -133,7 +19,6 @@ pub(crate) struct Framebuffer {
     len: usize,
     pub(crate) width: u32,
     pub(crate) height: u32,
-    /// Bytes per row in the mmap (≥ width due to padding).
     stride: usize,
 }
 
@@ -269,7 +154,7 @@ impl Framebuffer {
         }
     }
 
-    /// Full-screen GC16 refresh - flashes the display to clear ghosting.
+    /// Full-screen GC16 refresh
     pub(crate) fn refresh_full(&self) {
         self.send_update(
             UpdateRect {
@@ -283,7 +168,7 @@ impl Framebuffer {
         );
     }
 
-    /// Partial refresh of a dirty rectangle - fast, but may leave faint ghosting.
+    /// Partial refresh of a dirty rectangle
     pub(crate) fn refresh_region(
         &self,
         origin: slint::PhysicalPosition,

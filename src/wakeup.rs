@@ -72,8 +72,8 @@ pub(crate) fn make_wakeup() -> std::io::Result<Wakeup> {
     })
 }
 
-fn set_nonblock_cloexec(fd: &OwnedFd) -> std::io::Result<()> {
-    let raw = fd.as_raw_fd();
+fn set_nonblock_cloexec(file_descriptor: &OwnedFd) -> std::io::Result<()> {
+    let raw = file_descriptor.as_raw_fd();
     // SAFETY: these fcntl variants take an int arg or none, and fd is valid for the borrow.
     unsafe {
         let flags = libc::fcntl(raw, libc::F_GETFL);

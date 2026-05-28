@@ -2,9 +2,9 @@ use slint::LogicalPosition;
 use slint::platform::software_renderer::MinimalSoftwareWindow;
 use slint::platform::{PointerEventButton, WindowEvent};
 
-// One event from the touchscreen driver. Layout has to match exactly what the kernel writes.
+// Touchscreen driver event. Layout has to match exactly what the kernel writes.
 #[repr(C)]
-struct InputEvent {
+struct TouchInputEvent {
     timestamp_seconds: u32,
     timestamp_microseconds: u32,
     kind: u16,
@@ -50,7 +50,7 @@ struct InputAbsinfo {
 }
 
 pub(crate) struct TouchInput {
-    fd: libc::c_int,
+    file_descriptor: libc::c_int,
     tracking_id: i32,
     x: f32,
     y: f32,
@@ -90,7 +90,7 @@ impl TouchInput {
         let max_y = Self::query_axis_max(fd, TOUCH_POSITION_Y as u8).unwrap_or(4095) as f32;
 
         Ok(Self {
-            fd,
+            file_descriptor: fd,
             tracking_id: -1,
             x: 0.0,
             y: 0.0,
@@ -145,7 +145,7 @@ impl TouchInput {
 
     /// Raw fd of the touch device, for use with `poll(2)` in the event loop.
     pub(crate) fn fd(&self) -> libc::c_int {
-        self.fd
+        self.file_descriptor
     }
 
     /// Read any waiting touch events and forward them to the window as pointer events.
@@ -170,8 +170,8 @@ impl TouchInput {
         }
     }
 
-    fn read_event(&self) -> Option<InputEvent> {
-        let mut event = InputEvent {
+    fn read_event(&self) -> Option<TouchInputEvent> {
+        let mut event = TouchInputEvent {
             timestamp_seconds: 0,
             timestamp_microseconds: 0,
             kind: 0,
@@ -180,9 +180,9 @@ impl TouchInput {
         };
         let bytes_read = unsafe {
             libc::read(
-                self.fd,
-                &mut event as *mut InputEvent as *mut libc::c_void,
-                std::mem::size_of::<InputEvent>(),
+                self.file_descriptor,
+                &mut event as *mut TouchInputEvent as *mut libc::c_void,
+                std::mem::size_of::<TouchInputEvent>(),
             )
         };
         (bytes_read > 0).then_some(event)
@@ -199,7 +199,7 @@ impl TouchInput {
         });
     }
 
-    // Called when the driver signals "this batch of events is complete". Dispatch
+    // Called when the driver signals batch of events is finished. Dispatch
     // a press if the finger just touched down, or a move if it was already down.
     fn commit(&mut self, window: &MinimalSoftwareWindow) {
         if self.tracking_id < 0 {
@@ -222,7 +222,7 @@ impl TouchInput {
 impl Drop for TouchInput {
     fn drop(&mut self) {
         // Release the exclusive grab before closing
-        unsafe { libc::ioctl(self.fd, EVIOCGRAB as _, 0 as libc::c_int) };
-        unsafe { libc::close(self.fd) };
+        unsafe { libc::ioctl(self.file_descriptor, EVIOCGRAB as _, 0 as libc::c_int) };
+        unsafe { libc::close(self.file_descriptor) };
     }
 }
