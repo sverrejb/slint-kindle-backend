@@ -1,0 +1,71 @@
+import { VerticalBox, Slider } from "std-widgets.slint";
+
+
+export component AppWindow inherits Window {
+    background: white;
+
+    in-out property <int> level: 12;
+    property <int> max-level: 24;
+
+    callback level-changed(int);
+    callback quit();
+
+    // Quit button
+    Rectangle {
+        x: root.width - self.width - root.width * 0.03;
+        y: root.height * 0.02;
+        width: root.width * 0.1;
+        height: root.width * 0.1;
+        border-width: root.width * 0.005;
+        border-color: black;
+        border-radius: root.width * 0.015;
+        background: quit-touch.pressed ? #cccccc : white;
+
+        quit-touch := TouchArea {
+            clicked => { root.quit(); }
+        }
+
+        Text {
+            text: "×";
+            font-size: root.width * 0.06;
+            color: black;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+
+    VerticalBox {
+        alignment: center;
+        spacing: root.height * 0.04;
+
+        Text {
+            text: "Frontlight";
+            font-size: root.width * 0.08;
+            color: black;
+            horizontal-alignment: center;
+        }
+
+        Text {
+            text: root.level + " / " + root.max-level;
+            font-size: root.width * 0.15;
+            color: black;
+            horizontal-alignment: center;
+        }
+
+        // Defer applying the level to lipc until finger release
+        Slider {
+            width: root.width * 0.9;
+            height: root.height * 0.06;
+            minimum: 0;
+            maximum: root.max-level;
+            value: root.level;
+            changed(value) => {
+                root.level = round(value);
+            }
+            released(value) => {
+                root.level = round(value);
+                root.level-changed(root.level);
+            }
+        }
+    }
+}

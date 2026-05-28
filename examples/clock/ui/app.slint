@@ -4,17 +4,17 @@
 export component AppWindow inherits Window {
     background: white;
 
-    in property <string> time-text: "--:--";
+    in property <string> time-text: "--:--:--";
     callback quit();
 
-    // Main time display — 20% of screen width gives a comfortable fit for "HH:MM"
+    // Main time display — 13% of screen width fits "HH:MM:SS" comfortably
     Text {
         x: 0;
         y: 0;
         width: parent.width;
         height: parent.height;
         text: root.time-text;
-        font-size: root.width * 0.2;
+        font-size: root.width * 0.13;
         color: black;
         horizontal-alignment: center;
         vertical-alignment: center;

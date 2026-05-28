@@ -16,13 +16,13 @@ fn main() {
         move || {
             let Some(app) = weak.upgrade() else { return };
             let now = chrono::Local::now();
-            app.set_time_text(now.format("%H:%M").to_string().into());
+            app.set_time_text(now.format("%H:%M:%S").to_string().into());
         }
     };
     tick();
 
     let timer = Timer::default();
-    timer.start(TimerMode::Repeated, Duration::from_secs(60), tick);
+    timer.start(TimerMode::Repeated, Duration::from_secs(1), tick);
 
     app.run().expect("event loop error");
 }
