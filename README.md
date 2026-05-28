@@ -77,3 +77,14 @@ So far, the backend has been tested to work on:
 * Examples
 * Better device support
 * Font discovery instead of hard coded default
+
+## License
+
+The code in this crate is dual-licensed under either of
+
+* MIT License ([LICENSE-MIT](LICENSE-MIT) or https://opensource.org/license/mit)
+* Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or https://www.apache.org/licenses/LICENSE-2.0)
+
+at your option.
+
+Note that this crate depends on [`slint`](https://crates.io/crates/slint), which is licensed under `GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0`. Any application built using this backend and Slint must comply with one of Slint's licenses.
