@@ -12,7 +12,7 @@ homepage = "https://github.com/sverrejb/slint-kindle-backend"
 documentation = "https://docs.rs/slint-backend-kindle"
 keywords = ["slint", "kindle", "embedded", "eink", "framebuffer"]
 categories = ["embedded", "gui"]
-exclude = ["*.JPG", "*.jpg", "*.png", "examples"]
+exclude = ["*.JPG", "*.jpg", "*.png", "*.webp", "examples"]
 
 [workspace]
 members = ["examples/*"]

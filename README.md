@@ -5,7 +5,7 @@ Slint backend for jailbroken Kindles. Allows for running Slint GUIS on Kindle de
 > ⚠️ **Experimental crate: limited device support.**
 > This crate is experimental and has not been tested on a wide variety of Kindle devices. See "Tested devices" further down. Please file an issue (or a PR) if you try it on different hardware!
 
-![Slint app running on a Kindle Paperwhite](https://raw.githubusercontent.com/sverrejb/slint-kindle-backend/main/kindle.JPG)
+<img src="https://raw.githubusercontent.com/sverrejb/slint-kindle-backend/main/demo.webp" alt="Slint app running on a Kindle Paperwhite" width="750">
 
 ## Usage
 
@@ -87,4 +87,4 @@ The code in this crate is dual-licensed under either of
 
 at your option.
 
-Note that this crate depends on [`slint`](https://crates.io/crates/slint), which is licensed under `GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0`. Any application built using this backend and Slint must comply with one of Slint's licenses.
+Note that this crate depends on [`slint`](https://crates.io/crates/slint), which is licensed under `GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0`. **Any application built using this backend and Slint must comply with one of Slint's licenses.**
