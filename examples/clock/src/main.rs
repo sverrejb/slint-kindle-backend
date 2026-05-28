@@ -7,8 +7,7 @@ slint::include_modules!();
 static LIBERATION_SANS: &[u8] = include_bytes!("../fonts/LiberationSans-Regular.ttf");
 
 fn main() {
-    slint_backend_kindle::install(LIBERATION_SANS)
-        .expect("failed to install Kindle backend");
+    slint_backend_kindle::install(LIBERATION_SANS).expect("failed to install Kindle backend");
     let app = AppWindow::new().expect("failed to create window");
     app.on_quit(|| std::process::exit(0));
 
@@ -23,7 +22,7 @@ fn main() {
     tick();
 
     let timer = Timer::default();
-    timer.start(TimerMode::Repeated, Duration::from_secs(1), tick);
+    timer.start(TimerMode::Repeated, Duration::from_secs(60), tick);
 
     app.run().expect("event loop error");
 }
