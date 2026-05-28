@@ -143,6 +143,11 @@ impl TouchInput {
         None
     }
 
+    /// Raw fd of the touch device, for use with `poll(2)` in the event loop.
+    pub(crate) fn fd(&self) -> libc::c_int {
+        self.fd
+    }
+
     /// Read any waiting touch events and forward them to the window as pointer events.
     pub(crate) fn poll(&mut self, window: &MinimalSoftwareWindow) {
         while let Some(event) = self.read_event() {

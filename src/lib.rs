@@ -20,6 +20,7 @@
 mod framebuffer;
 mod platform;
 mod touch;
+mod wakeup;
 
 use platform::KindlePlatform;
 use slint::platform::WindowAdapter;
@@ -67,7 +68,8 @@ pub fn install(font_data: &[u8]) -> Result<KindleBackend, slint::PlatformError> 
     // SAFETY: install() runs once at startup before any threads exist, so nothing else can read this env var at the same time.
     unsafe { std::env::set_var("SLINT_DEFAULT_FONT", &path); }
 
-    let platform = KindlePlatform::new();
+    let platform = KindlePlatform::new()
+        .map_err(|e| slint::PlatformError::Other(format!("failed to init Kindle platform: {e}")))?;
     let window = platform.window.clone();
     slint::platform::set_platform(Box::new(platform))
         .map_err(|e| slint::PlatformError::Other(format!("{e}")))?;
