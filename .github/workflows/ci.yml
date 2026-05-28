@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-kindle:
+    name: Cross-compile for Kindle (armv7 musl)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: armv7-unknown-linux-musleabihf
+
+      - name: Install cargo-zigbuild and Zig
+        run: |
+          pip3 install ziglang
+          cargo install cargo-zigbuild
+
+      - name: Build library
+        run: cargo zigbuild --target armv7-unknown-linux-musleabihf
+
+      - name: Build examples
+        run: cargo zigbuild --target armv7-unknown-linux-musleabihf --workspace
+
+  check:
+    name: Check & Clippy (host)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cargo check
+        run: cargo check --workspace
+
+      - name: Clippy
+        run: cargo clippy --workspace -- -D warnings
