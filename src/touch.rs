@@ -78,7 +78,7 @@ impl TouchInput {
         }
 
         // Exclusively grab the device so X/framework doesn't consume our events.
-        let ret = unsafe { libc::ioctl(fd, EVIOCGRAB as libc::Ioctl, 1 as libc::c_int) };
+        let ret = unsafe { libc::ioctl(fd, EVIOCGRAB as _, 1 as libc::c_int) };
         if ret < 0 {
             let err = std::io::Error::last_os_error();
             unsafe { libc::close(fd) };
@@ -108,7 +108,7 @@ impl TouchInput {
         let ret = unsafe {
             libc::ioctl(
                 fd,
-                eviocgabs(axis) as libc::Ioctl,
+                eviocgabs(axis) as _,
                 &mut info as *mut InputAbsinfo,
             )
         };
@@ -130,7 +130,7 @@ impl TouchInput {
             let mut abs_bits = [0u8; 8];
             // EVIOCGBIT(EV_ABS=3, 8) on 32-bit: _IOC(2, 'E', 0x23, 8)
             let request: libc::c_ulong = 2 << 30 | 8 << 16 | (b'E' as libc::c_ulong) << 8 | 0x23;
-            let ret = unsafe { libc::ioctl(fd, request as libc::Ioctl, abs_bits.as_mut_ptr()) };
+            let ret = unsafe { libc::ioctl(fd, request as _, abs_bits.as_mut_ptr()) };
             unsafe { libc::close(fd) };
             if ret < 0 {
                 continue;
@@ -217,7 +217,7 @@ impl TouchInput {
 impl Drop for TouchInput {
     fn drop(&mut self) {
         // Release the exclusive grab before closing
-        unsafe { libc::ioctl(self.fd, EVIOCGRAB as libc::Ioctl, 0 as libc::c_int) };
+        unsafe { libc::ioctl(self.fd, EVIOCGRAB as _, 0 as libc::c_int) };
         unsafe { libc::close(self.fd) };
     }
 }
