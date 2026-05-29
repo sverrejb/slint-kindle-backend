@@ -12,8 +12,10 @@ use slint::platform::software_renderer::{
 use slint::platform::{EventLoopProxy, Platform, PlatformError, WindowAdapter};
 
 use crate::framebuffer::Framebuffer;
+use crate::power;
 use crate::touch::TouchInput;
 use crate::wakeup::{self, KindleEventLoopProxy, Queue, Wakeup};
+use crate::{OnWakeCallback, WakeSchedule};
 
 // Animations get redrawn at most ~30 fps. E-ink can't keep up with anything
 // faster, so quicker wakes would just waste battery.
@@ -54,10 +56,15 @@ pub(crate) struct KindlePlatform {
     queue: Queue,
     wakeup: Wakeup,
     quit_flag: Arc<AtomicBool>,
+    pub(crate) wake_schedule: Arc<Mutex<Option<WakeSchedule>>>,
+    pub(crate) on_wake: OnWakeCallback,
 }
 
 impl KindlePlatform {
-    pub(crate) fn new() -> std::io::Result<Self> {
+    pub(crate) fn new(
+        wake_schedule: Arc<Mutex<Option<WakeSchedule>>>,
+        on_wake: OnWakeCallback,
+    ) -> std::io::Result<Self> {
         let window = MinimalSoftwareWindow::new(RepaintBufferType::ReusedBuffer);
         let wakeup = wakeup::make_wakeup()?;
         Ok(Self {
@@ -66,6 +73,8 @@ impl KindlePlatform {
             queue: Arc::new(Mutex::new(Vec::new())),
             wakeup,
             quit_flag: Arc::new(AtomicBool::new(false)),
+            wake_schedule,
+            on_wake,
         })
     }
 }
@@ -105,7 +114,49 @@ impl Platform for KindlePlatform {
 
         let wakeup_read_fd = self.wakeup.read.as_raw_fd();
 
+        // Wakealarm path is probed once. If the device doesn't expose one
+        // (e.g. running on a dev host), the suspend cycle stays disabled even
+        // if a schedule is configured.
+        let wakealarm = power::find_wakealarm().ok();
+        let mut last_interaction = Instant::now();
+
         loop {
+            // Suspend cycle: only triggers if the consumer opted in via
+            // set_wake_schedule and we found a writable wakealarm. Touches
+            // reset last_interaction, so user interaction always wins over the
+            // stay_awake countdown.
+            if let (Some(schedule), Some(wakealarm_path)) = (
+                *self.wake_schedule.lock().expect("wake schedule poisoned"),
+                wakealarm.as_ref(),
+            ) {
+                // Pending Slint timers don't block suspend: they'll just fire on
+                // resume (a 1 Hz clock timer would otherwise pin the device awake).
+                // Animations and queued closures do block — animations want to
+                // play out smoothly, and a queued closure is pending main-thread
+                // work the app expects to run.
+                let nothing_pending = !self.window.has_active_animations()
+                    && self
+                        .queue
+                        .lock()
+                        .expect("event loop closure queue poisoned")
+                        .is_empty();
+                if last_interaction.elapsed() >= schedule.stay_awake && nothing_pending {
+                    frame_buffer.wait_for_update_complete();
+                    let _ = power::arm_wakealarm(wakealarm_path, schedule.wake_interval);
+                    let _ = power::suspend_to_mem();
+                    // We just woke. Start a fresh stay_awake window so the
+                    // consumer's app gets at least that long to react.
+                    last_interaction = Instant::now();
+                    // Fire the consumer's on-wake callback (if any) before
+                    // any rendering this cycle, so e.g. an HTTP poll runs
+                    // before the next draw shows stale data.
+                    if let Some(cb) = self.on_wake.borrow_mut().as_mut() {
+                        cb();
+                    }
+                    continue;
+                }
+            }
+
             // Wait for touch event or wakeup from application thread.
             // -1 means "wait forever," which lets the CPU go to sleep.
             let timeout_ms: libc::c_int = match (
@@ -174,6 +225,13 @@ impl Platform for KindlePlatform {
             // noticeable chunk of time on E-ink and we'd rather skip it on the way out.
             if self.quit_flag.load(Ordering::SeqCst) {
                 break;
+            }
+
+            // Touch activity counts as user interaction, so it resets the
+            // suspend countdown — under a wake schedule this is what keeps
+            // the device awake while the user is using it.
+            if file_descriptors[0].revents & libc::POLLIN != 0 {
+                last_interaction = Instant::now();
             }
 
             touch_input.poll(&self.window);

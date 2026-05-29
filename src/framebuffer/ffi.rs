@@ -110,6 +110,18 @@ pub(super) struct UpdateRequest {
 // The ioctl number was confirmed by stracing `eips` on a real device.
 pub(super) const MXCFB_SEND_UPDATE: libc::c_ulong = 0x4048_462e;
 
+// _IOWR('F', 0x2f, struct mxcfb_update_marker_data) — 8 bytes (marker + collision_test).
+// Blocks until the EPDC has finished applying the update with this marker.
+// Used before suspend-to-RAM so the panel doesn't latch mid-refresh on the way down.
+pub(super) const MXCFB_WAIT_FOR_UPDATE_COMPLETE: libc::c_ulong = 0xc008_462f;
+
+#[repr(C)]
+#[derive(Default)]
+pub(super) struct UpdateMarkerData {
+    pub(super) update_marker: u32,
+    pub(super) collision_test: u32,
+}
+
 pub(super) const WAVEFORM_MODE_GC16: u32 = 2; // Full 16-level grayscale refresh (slow, high quality)
 pub(super) const WAVEFORM_MODE_AUTO: u32 = 257; // Let the driver pick the best waveform
 pub(super) const UPDATE_MODE_PARTIAL: u32 = 0; // Only redraw the dirty region

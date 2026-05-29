@@ -5,8 +5,9 @@ use std::os::fd::AsRawFd;
 
 use ffi::{
     AlternateBuffer, FBIOGET_FSCREENINFO, FBIOGET_VSCREENINFO, FbFixScreeninfo, FbVarScreeninfo,
-    MXCFB_SEND_UPDATE, TEMP_USE_AMBIENT, UPDATE_MODE_FULL, UPDATE_MODE_PARTIAL, UpdateRect,
-    UpdateRequest, WAVEFORM_MODE_AUTO, WAVEFORM_MODE_GC16,
+    MXCFB_SEND_UPDATE, MXCFB_WAIT_FOR_UPDATE_COMPLETE, TEMP_USE_AMBIENT, UPDATE_MODE_FULL,
+    UPDATE_MODE_PARTIAL, UpdateMarkerData, UpdateRect, UpdateRequest, WAVEFORM_MODE_AUTO,
+    WAVEFORM_MODE_GC16,
 };
 
 /// Memory-mapped handle to the Kindle's e-ink framebuffer.
@@ -166,6 +167,24 @@ impl Framebuffer {
             WAVEFORM_MODE_GC16,
             UPDATE_MODE_FULL,
         );
+    }
+
+    /// Block until the EPDC has applied the last update (marker 1).
+    ///
+    /// Used before suspending to RAM so the panel doesn't latch mid-refresh.
+    /// Best-effort: a failing ioctl is ignored, since this is purely defensive.
+    pub(crate) fn wait_for_update_complete(&self) {
+        let mut marker = UpdateMarkerData {
+            update_marker: 1,
+            collision_test: 0,
+        };
+        unsafe {
+            libc::ioctl(
+                self.file.as_raw_fd(),
+                MXCFB_WAIT_FOR_UPDATE_COMPLETE as _,
+                &mut marker as *mut _,
+            );
+        }
     }
 
     /// Partial refresh of a dirty rectangle

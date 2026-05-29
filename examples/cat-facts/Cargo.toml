@@ -1,0 +1,15 @@
+[package]
+name = "slint-kindle-cat-facts"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+slint = { version = "1.16", default-features = false, features = ["compat-1-2", "std", "renderer-software"] }
+slint-backend-kindle = { path = "../.." }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+ureq = { version = "2", features = ["json"] }
+serde = { version = "1", features = ["derive"] }
+
+[build-dependencies]
+slint-build = "1.16"

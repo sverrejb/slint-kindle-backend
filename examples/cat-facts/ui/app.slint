@@ -1,0 +1,75 @@
+// Demonstrates KindleBackend::on_wake by fetching a random cat fact from
+// catfact.ninja each time the device resumes from suspend. Shows a debug log
+// at the bottom so you can see retries, wifi state, and timestamps.
+export component AppWindow inherits Window {
+    background: white;
+
+    in property <string> time-text: "--:--:--";
+    in property <string> fact-text: "";
+    in property <string> log-text: "";
+    callback quit();
+
+    VerticalLayout {
+        x: root.width * 0.04;
+        y: root.height * 0.03;
+        width: root.width * 0.92;
+        height: root.height * 0.94;
+        spacing: root.height * 0.02;
+
+        Text {
+            text: root.time-text;
+            font-size: root.width * 0.09;
+            color: black;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            height: root.height * 0.15;
+        }
+
+        Text {
+            text: root.fact-text;
+            font-size: root.width * 0.026;
+            color: black;
+            wrap: word-wrap;
+            horizontal-alignment: center;
+        }
+
+        Rectangle {
+            height: 2px;
+            background: black;
+        }
+
+        Text {
+            text: root.log-text;
+            font-size: root.width * 0.018;
+            color: #444;
+            wrap: no-wrap;
+            horizontal-alignment: left;
+            vertical-alignment: top;
+        }
+    }
+
+    // Quit button — top-right corner, smaller than the clock example so it
+    // doesn't crowd the clock at the top of the layout.
+    Rectangle {
+        x: parent.width - self.width - root.width * 0.03;
+        y: root.height * 0.02;
+        width: root.width * 0.08;
+        height: root.width * 0.08;
+        border-width: root.width * 0.005;
+        border-color: black;
+        border-radius: root.width * 0.015;
+        background: quit-touch.pressed ? #cccccc : white;
+
+        quit-touch := TouchArea {
+            clicked => { root.quit(); }
+        }
+
+        Text {
+            text: "×";
+            font-size: root.width * 0.05;
+            color: black;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+}

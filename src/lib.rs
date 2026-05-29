@@ -19,17 +19,41 @@
 
 mod framebuffer;
 mod platform;
+mod power;
 mod touch;
 mod wakeup;
 
 use platform::KindlePlatform;
 use slint::platform::WindowAdapter;
 use slint::platform::software_renderer::MinimalSoftwareWindow;
+use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
-/// Returned by [`install`]. Use it to add more fonts later.
+pub(crate) type OnWakeCallback = Rc<RefCell<Option<Box<dyn FnMut()>>>>;
+
+/// How often to wake from suspend-to-RAM and how long to stay awake afterwards.
+///
+/// Pass to [`KindleBackend::set_wake_schedule`] to opt in. Without it, the
+/// backend never suspends the SoC — the event loop just blocks in `poll(2)`,
+/// which is fine for plugged-in use but burns battery.
+///
+/// Touch activity during the awake window resets `stay_awake`, exactly like
+/// the device's normal idle timer.
+#[derive(Debug, Clone, Copy)]
+pub struct WakeSchedule {
+    /// Time between scheduled wakes from suspend.
+    pub wake_interval: Duration,
+    /// How long to stay awake after a wake or the last touch.
+    pub stay_awake: Duration,
+}
+
+/// Returned by [`install`]. Use it to add more fonts and configure power.
 pub struct KindleBackend {
     window: Rc<MinimalSoftwareWindow>,
+    wake_schedule: Arc<Mutex<Option<WakeSchedule>>>,
+    on_wake: OnWakeCallback,
 }
 
 impl KindleBackend {
@@ -43,6 +67,34 @@ impl KindleBackend {
             .renderer()
             .register_font_from_memory(data)
             .map_err(|e| slint::PlatformError::Other(format!("{e}")))
+    }
+
+    /// Configure the wake-from-suspend cycle.
+    ///
+    /// Once set, the event loop will arm the RTC and suspend to RAM whenever
+    /// the consumer's app has been idle for `stay_awake`. The device wakes
+    /// after `wake_interval` (or earlier on hardware events like the power
+    /// button), giving the app a chance to refresh.
+    ///
+    /// Safe to call at any time. Pass `None` to disable. Disabling mid-run
+    /// won't wake the device if it's already suspended — you can only change
+    /// the schedule the next time the loop is awake.
+    pub fn set_wake_schedule(&self, schedule: Option<WakeSchedule>) {
+        *self.wake_schedule.lock().expect("wake schedule poisoned") = schedule;
+    }
+
+    /// Run `callback` once each time the device wakes from a scheduled suspend.
+    ///
+    /// Fires on the event-loop (UI) thread, after resume but before the next
+    /// render. The right place to refresh state that should be current when
+    /// the screen redraws — polling an HTTP API, reading a sensor, etc. Don't
+    /// rely on a `slint::Timer` to align with `wake_interval`; Slint timers
+    /// run on their own schedule and may fire before or after the wake.
+    ///
+    /// Replaces any previously-set callback. Not invoked on the initial start
+    /// — your app's normal init code already runs then.
+    pub fn on_wake<F: FnMut() + 'static>(&self, callback: F) {
+        *self.on_wake.borrow_mut() = Some(Box::new(callback));
     }
 }
 
@@ -68,10 +120,16 @@ pub fn install(font_data: &[u8]) -> Result<KindleBackend, slint::PlatformError> 
     // SAFETY: install() runs once at startup before any threads exist, so nothing else can read this env var at the same time.
     unsafe { std::env::set_var("SLINT_DEFAULT_FONT", &path); }
 
-    let platform = KindlePlatform::new()
+    let wake_schedule = Arc::new(Mutex::new(None));
+    let on_wake: OnWakeCallback = Rc::new(RefCell::new(None));
+    let platform = KindlePlatform::new(wake_schedule.clone(), on_wake.clone())
         .map_err(|e| slint::PlatformError::Other(format!("failed to init Kindle platform: {e}")))?;
     let window = platform.window.clone();
     slint::platform::set_platform(Box::new(platform))
         .map_err(|e| slint::PlatformError::Other(format!("{e}")))?;
-    Ok(KindleBackend { window })
+    Ok(KindleBackend {
+        window,
+        wake_schedule,
+        on_wake,
+    })
 }
