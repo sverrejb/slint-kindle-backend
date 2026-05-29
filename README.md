@@ -9,13 +9,16 @@ Slint backend for jailbroken Kindles. Allows for running Slint GUIS on Kindle de
 
 ## Usage
 
+For suggestions on how to set up your dev environment, see the[getting started doc](getting_started.md).
+
 Add the crate to your app:
 
-```toml
-[dependencies]
-slint = { version = "1.16", default-features = false, features = ["compat-1-2", "std", "renderer-software"] }
-slint-backend-kindle = "0.1"
+```sh
+cargo add slint --no-default-features --features compat-1-2,std,renderer-software
+cargo add slint-backend-kindle
 ```
+
+Slint is added with `--no-default-features` and only `compat-1-2`, `std`, and `renderer-software` because the Kindle has no GPU — any hardware-renderer feature is meaningless and would pull in unwanted system dependencies. `renderer-software` specifically is required: it's the only renderer that can drive the Kindle framebuffer.
 
 Bundle a TTF/OTF font with your app and pass it to `install()` at startup. **The font is required**. The various Kindle models has no fontconfig and no default location for system fonts, so Slint's software renderer would panic on the first fallback query without one.
 
