@@ -17,3 +17,6 @@ Thumbs.db
 # Local deploy/launch scripts (not yet ready to commit)
 /scripts
 /kual
+
+# Log files pulled from the device for analysis
+/*.log

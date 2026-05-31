@@ -1,5 +1,7 @@
+use std::io::Write;
+use std::rc::Rc;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use slint::{Timer, TimerMode};
 use slint_backend_kindle::WakeSchedule;
@@ -14,6 +16,12 @@ const FETCH_TIMEOUT: Duration = Duration::from_secs(5);
 const RETRY_DELAY: Duration = Duration::from_secs(2);
 const MAX_LOG_LINES: usize = 12;
 
+// Per-run log directory. Each launch gets its own timestamped file so
+// consecutive experiments don't blur together. The launcher script sets
+// RUN_TS to the same stamp it uses for its own stderr capture, so the two
+// files land next to each other and pair cleanly in analyze-logs.py.
+const LOG_DIR: &str = "/mnt/us/slint-kindle-logs";
+
 #[derive(serde::Deserialize)]
 struct CatFact {
     fact: String,
@@ -21,16 +29,33 @@ struct CatFact {
 
 struct Logger {
     lines: Vec<String>,
+    file_path: String,
 }
 
 impl Logger {
-    fn new() -> Self {
-        Self { lines: Vec::new() }
+    fn new(file_path: String) -> Self {
+        if let Some(parent) = std::path::Path::new(&file_path).parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        Self {
+            lines: Vec::new(),
+            file_path,
+        }
     }
 
     fn push(&mut self, line: impl Into<String>) {
         let stamp = chrono::Local::now().format("%H:%M:%S");
-        self.lines.push(format!("[{stamp}] {}", line.into()));
+        let formatted = format!("[{stamp}] {}", line.into());
+        // Best-effort file append; on the dev host the directory doesn't
+        // exist and we just silently skip — the on-screen view still works.
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.file_path)
+        {
+            let _ = writeln!(f, "{formatted}");
+        }
+        self.lines.push(formatted);
         while self.lines.len() > MAX_LOG_LINES {
             self.lines.remove(0);
         }
@@ -39,6 +64,16 @@ impl Logger {
     fn text(&self) -> String {
         self.lines.join("\n")
     }
+}
+
+/// Build the path for this run's structured log. The launcher exports
+/// `RUN_TS=YYYYMMDDTHHMMSS`; when run directly without the launcher we fall
+/// back to computing our own stamp so files still get unique names.
+fn log_file_path() -> String {
+    let ts = std::env::var("RUN_TS").unwrap_or_else(|_| {
+        chrono::Local::now().format("%Y%m%dT%H%M%S").to_string()
+    });
+    format!("{LOG_DIR}/{ts}-cat-facts.log")
 }
 
 /// Report the first wireless/ethernet interface's link state. Wifi typically
@@ -52,6 +87,24 @@ fn link_state() -> String {
         }
     }
     "no-iface".to_string()
+}
+
+/// Read the current RTC wakealarm value. Empty / "0" means no alarm set.
+/// A future epoch second means *someone* has armed it — either us, just
+/// before suspend, or powerd as part of its own state machine.
+fn wakealarm_value() -> String {
+    for n in 0..4 {
+        let path = format!("/sys/class/rtc/rtc{n}/wakealarm");
+        if let Ok(v) = std::fs::read_to_string(&path) {
+            let trimmed = v.trim();
+            return if trimmed.is_empty() {
+                format!("rtc{n}=empty")
+            } else {
+                format!("rtc{n}={trimmed}")
+            };
+        }
+    }
+    "no-rtc".to_string()
 }
 
 fn fetch_cat_fact() -> Result<String, String> {
@@ -122,7 +175,7 @@ fn main() {
     let app = AppWindow::new().expect("failed to create window");
     app.on_quit(|| std::process::exit(0));
 
-    let log = Arc::new(Mutex::new(Logger::new()));
+    let log = Arc::new(Mutex::new(Logger::new(log_file_path())));
     push_log(&log, &app.as_weak(), "startup".into());
 
     let tick = {
@@ -148,22 +201,72 @@ fn main() {
         stay_awake: Duration::from_secs(30),
     }));
 
+    // Holds the most recent wake's wall-clock time so each wake can log how
+    // long since the previous one (= stay_awake + suspend duration). Also
+    // keeps the mid-window probe timer alive across wakes; dropping it would
+    // cancel the timer.
+    let last_wake = Arc::new(Mutex::new(None::<SystemTime>));
+    let cycle = Arc::new(Mutex::new(0u32));
+    let mid_window_probe = Rc::new(Timer::default());
+
     backend.on_wake({
         let log = log.clone();
         let weak = app.as_weak();
+        let last_wake = last_wake.clone();
+        let cycle = cycle.clone();
+        let probe_timer = mid_window_probe.clone();
+        let probe_log = log.clone();
+        let probe_weak = app.as_weak();
         move || {
-            // We're on the UI thread here, so update directly — no need to
-            // bounce through invoke_from_event_loop.
+            let now = SystemTime::now();
+            let delta = {
+                let mut last = last_wake.lock().expect("last_wake poisoned");
+                let d = last.and_then(|prev| now.duration_since(prev).ok());
+                *last = Some(now);
+                d
+            };
+            let cycle_n = {
+                let mut c = cycle.lock().expect("cycle poisoned");
+                *c += 1;
+                *c
+            };
+            let delta_str = delta
+                .map(|d| format!("Δ{}s", d.as_secs()))
+                .unwrap_or_else(|| "first".to_string());
+
             let text = {
                 let mut logger = log.lock().expect("log poisoned");
-                logger.push("wake");
+                logger.push(format!(
+                    "wake #{cycle_n} {delta_str} {}",
+                    wakealarm_value()
+                ));
                 logger.text()
             };
             if let Some(app) = weak.upgrade() {
-                let now = chrono::Local::now();
-                app.set_time_text(now.format("%H:%M:%S").to_string().into());
+                let now_local = chrono::Local::now();
+                app.set_time_text(now_local.format("%H:%M:%S").to_string().into());
                 app.set_log_text(text.into());
             }
+
+            // Schedule a probe mid-awake-window. If powerd writes wakealarm
+            // during our awake window, this is where we'll catch it — at this
+            // point we have NOT armed it yet, so a non-empty value means
+            // somebody else did.
+            probe_timer.start(TimerMode::SingleShot, Duration::from_secs(15), {
+                let log = probe_log.clone();
+                let weak = probe_weak.clone();
+                move || {
+                    let text = {
+                        let mut logger = log.lock().expect("log poisoned");
+                        logger.push(format!("mid-window probe: {}", wakealarm_value()));
+                        logger.text()
+                    };
+                    if let Some(app) = weak.upgrade() {
+                        app.set_log_text(text.into());
+                    }
+                }
+            });
+
             spawn_fetch(log.clone(), weak.clone());
         }
     });
