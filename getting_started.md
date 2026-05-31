@@ -10,6 +10,21 @@ In order to run custom software on a Kindle, you need to jailbreak it first. Thi
 
 After you have a jailbroken Kindle, you can install USBNetwork or USBNetLite depending on your firmware version. The guides I found for this were not too complete or coherent, but by following [these steps](https://mip-wiki.pages.dev/database/usbnet/) you should get it working. This enables you to access your kindle over SSH, either via Wifi or USB cable.
 
+> **Note:** When connecting over USB, you'll usually need to bring up the host-side USB-ethernet interface and give it an address on the Kindle's subnet before SSH works. On macOS this looks like:
+>
+> ```sh
+> sudo ifconfig en9 192.168.15.201 netmask 255.255.255.0 up
+> ```
+>
+> On Linux the equivalent is `ip`:
+>
+> ```sh
+> sudo ip addr add 192.168.15.201/24 dev <iface>
+> sudo ip link set <iface> up
+> ```
+>
+> Replace `en9`/`<iface>` with your actual interface (check `ifconfig`/`ip link`). The deploy script further down does this `ip`-based setup automatically.
+
 ### SSH niceties
 
 Logging in as `root@192.168.15.244` every time gets old fast, so add an entry to your `~/.ssh/config`:
