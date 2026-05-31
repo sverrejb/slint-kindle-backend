@@ -9,7 +9,7 @@ Slint backend for jailbroken Kindles. Allows for running Slint GUIS on Kindle de
 
 ## Usage
 
-For suggestions on how to set up your dev environment, see the[getting started doc](getting_started.md).
+For suggestions on how to set up your dev environment, see the [getting started doc](https://github.com/sverrejb/slint-kindle-backend/blob/main/getting_started.md).
 
 Add the crate to your app:
 

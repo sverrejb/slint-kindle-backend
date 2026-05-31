@@ -12,7 +12,7 @@ After you have a jailbroken Kindle, you can install USBNetwork or USBNetLite dep
 
 ### SSH niceties
 
-The Kindle gadget driver advertises a fixed MAC (`ee:49:00:00:00:00`) and USBNetwork brings the device up on `192.168.15.244`, with your host expected at `192.168.15.201`. Logging in as `root@192.168.15.244` every time gets old fast, so add an entry to your `~/.ssh/config`:
+Logging in as `root@192.168.15.244` every time gets old fast, so add an entry to your `~/.ssh/config`:
 
 ```
 Host kindle
@@ -20,33 +20,90 @@ Host kindle
     User root
 ```
 
-Then `ssh kindle` is enough. Set up a key with `ssh-copy-id kindle` so you stop typing the root password, and on macOS the USB-ethernet interface keeps its config across replugs as long as the interface name sticks — so once it's configured you can deploy repeatedly without re-running `ifconfig`.
+Then `ssh kindle` is enough. And while ssh-copy-id does not work, copying your .pub file to /mnt/us/usbnet/etc/authorized_keys (authorized_keys is the file, not a folder) should work.
 
+## Launch script
+
+A launch script is usefule for suspending processes that might interfere with running your app (like writing to the screen buffer etc). This script example hands the framebuffer to your app, and restores everything on exit. This is only meant as an example, and might/will need to be adjusted accoring to your needs, kindle model and other factors.
+
+```sh
+#!/bin/sh
+BIN="my-app"
+APP="/mnt/us/$BIN"
+
+
+if pidof reader.lua >/dev/null 2>&1; then
+    echo "Stopping KOReader..."
+    kill $(pidof reader.lua) 2>/dev/null
+    sleep 1
+fi
+
+lipc-set-prop com.lab126.pillow disableEnablePillow disable 2>/dev/null
+
+killall -STOP awesome 2>/dev/null
+killall -STOP cvm 2>/dev/null
+killall -STOP KPPMainApp 2>/dev/null
+
+usleep 300000
+
+LOG_DIR="/mnt/us/$BIN-logs"
+mkdir -p "$LOG_DIR"
+RUN_TS=$(date +%Y%m%dT%H%M%S)
+export RUN_TS
+
+echo "Starting $BIN... (logs: $LOG_DIR/${RUN_TS}-*)"
+"$APP" >"$LOG_DIR/${RUN_TS}-${BIN}-stderr.log" 2>&1
+EXIT_CODE=$?
+
+echo "Restoring UI..."
+killall -CONT KPPMainApp 2>/dev/null
+killall -CONT cvm 2>/dev/null
+killall -CONT awesome 2>/dev/null
+lipc-set-prop com.lab126.pillow disableEnablePillow enable 2>/dev/null
+
+echo "Done (exit $EXIT_CODE)."
+exit $EXIT_CODE
+```
 
 ## Deploy script
 
-`scripts/deploy-mac.sh <example-dir>` is the one-shot build-and-push for macOS over USBNetwork. Run e.g. `scripts/deploy-mac.sh clock`. It:
+Having a script for deploying the app is very handy. The example below builds your app, configures the USB-ethernet interface, and pushes the binary plus the launcher over SSH.
 
-1. Reads the cargo package name out of `examples/<dir>/Cargo.toml` (the directory name and package name don't match, e.g. `examples/simple` → `slint-kindle-example`).
-2. Finds the host interface by matching the Kindle's advertised MAC, and configures it with `192.168.15.201` if it isn't already on that subnet (this is the only step that needs `sudo`).
-3. Cross-compiles for `armv7-unknown-linux-musleabihf` with `cargo zigbuild`.
-4. `scp`s the binary, the launcher (as `launch-slint.sh`), and the KUAL `menu.json` to `/mnt/us`.
+```sh
+#!/bin/sh
+set -eu
 
-It `scp`s over the USB-ethernet gadget rather than mounting mass storage, so the USB port isn't cycled on every deploy. Prerequisites: `rustup target add armv7-unknown-linux-musleabihf`, `cargo install cargo-zigbuild`, a `zig` install, and USBNetwork enabled on the Kindle. Afterwards, launch from KUAL or run `launch-slint.sh <package>` over SSH.
+PACKAGE="my-app"
+TARGET="armv7-unknown-linux-musleabihf"
+KINDLE_HOST="${KINDLE_HOST:-kindle}"
+KINDLE_DST="/mnt/us"
 
+KINDLE_MAC="ee:49:00:00:00:00"
+HOST_IP="192.168.15.201"
+PREFIX="24"
 
-## KUAL launcher
+IFACE=$(ip -o link | awk -v mac="$KINDLE_MAC" 'tolower($0) ~ mac { name=$2; sub(":", "", name); print name; exit }')
 
-KUAL reads a `menu.json` from each extension directory and renders it as a menu on the device. This repo keeps the canonical copy in `kual/menu.json`; it defines a top-level **Slint Kindle** entry with one item per example, each invoking `/mnt/us/launch-slint.sh <binary-name>`:
+if [ -z "$IFACE" ]; then
+    echo "error: no interface with MAC $KINDLE_MAC found (is USBNetwork enabled?)" >&2
+    exit 1
+fi
 
-```json
-{
-    "name": "Start Clock",
-    "priority": 2,
-    "action": "/mnt/us/launch-slint.sh slint-kindle-clock",
-    "status": false,
-    "internal": "status Starting Slint Kindle Clock..."
-}
+if ! ip -o addr show "$IFACE" | grep -q "inet $HOST_IP/"; then
+    echo "Configuring $IFACE with $HOST_IP (sudo)..."
+    sudo ip addr add "$HOST_IP/$PREFIX" dev "$IFACE"
+    sudo ip link set "$IFACE" up
+fi
+
+echo "Building $PACKAGE for $TARGET..."
+cargo zigbuild --release --target "$TARGET" -p "$PACKAGE"
+
+BIN_SRC="target/$TARGET/release/$PACKAGE"
+echo "Binary size: $(du -h "$BIN_SRC" | awk '{print $1}')"
+
+echo "Copying to $KINDLE_HOST:$KINDLE_DST..."
+scp "$BIN_SRC" "$KINDLE_HOST:$KINDLE_DST/$PACKAGE"
+scp launch.sh "$KINDLE_HOST:$KINDLE_DST/launch-$PACKAGE.sh"
+
+echo "Done. On the device: launch-$PACKAGE.sh"
 ```
-
-The launcher (`scripts/launch-kindle.sh`, deployed as `launch-slint.sh`) suspends the competing UI before handing the framebuffer to your app: it stops KOReader if running, disables the pillow status bar, and `SIGSTOP`s the window manager (`awesome`), content viewer (`cvm`), and main app (`KPPMainApp`). When your binary exits it `SIGCONT`s them and re-enables the pillow, so the device returns to its normal UI. App output (stdout/stderr) is captured to `/mnt/us/<binary-name>.log` for debugging. Picking an item from KUAL and running `launch-slint.sh <binary>` over SSH are equivalent — both call the same script.
