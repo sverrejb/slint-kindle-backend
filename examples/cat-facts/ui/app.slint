@@ -1,6 +1,3 @@
-// Demonstrates KindleBackend::on_wake by fetching a random cat fact from
-// catfact.ninja each time the device resumes from suspend. Shows a debug log
-// at the bottom so you can see retries, wifi state, and timestamps.
 export component AppWindow inherits Window {
     background: white;
 
@@ -48,8 +45,6 @@ export component AppWindow inherits Window {
         }
     }
 
-    // Quit button — top-right corner, smaller than the clock example so it
-    // doesn't crowd the clock at the top of the layout.
     Rectangle {
         x: parent.width - self.width - root.width * 0.03;
         y: root.height * 0.02;

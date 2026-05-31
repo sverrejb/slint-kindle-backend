@@ -191,20 +191,14 @@ fn main() {
     let timer = Timer::default();
     timer.start(TimerMode::Repeated, Duration::from_secs(1), tick);
 
-    // Initial fetch so we don't show an empty fact area before the first wake.
     spawn_fetch(log.clone(), app.as_weak());
 
-    // 30s awake window gives wifi time to reconnect and the fetch to retry a
-    // few times before we suspend again. Wake every 60s.
-    backend.set_wake_schedule(Some(WakeSchedule {
-        wake_interval: Duration::from_secs(60),
-        stay_awake: Duration::from_secs(30),
-    }));
 
-    // Holds the most recent wake's wall-clock time so each wake can log how
-    // long since the previous one (= stay_awake + suspend duration). Also
-    // keeps the mid-window probe timer alive across wakes; dropping it would
-    // cancel the timer.
+    let backend = backend.set_wake_schedule(WakeSchedule {
+        wake_interval: Duration::from_secs(3600),
+        stay_awake: Duration::from_secs(30),
+    });
+
     let last_wake = Arc::new(Mutex::new(None::<SystemTime>));
     let cycle = Arc::new(Mutex::new(0u32));
     let mid_window_probe = Rc::new(Timer::default());
@@ -248,10 +242,6 @@ fn main() {
                 app.set_log_text(text.into());
             }
 
-            // Schedule a probe mid-awake-window. If powerd writes wakealarm
-            // during our awake window, this is where we'll catch it — at this
-            // point we have NOT armed it yet, so a non-empty value means
-            // somebody else did.
             probe_timer.start(TimerMode::SingleShot, Duration::from_secs(15), {
                 let log = probe_log.clone();
                 let weak = probe_weak.clone();

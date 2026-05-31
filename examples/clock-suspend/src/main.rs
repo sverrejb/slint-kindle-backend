@@ -30,10 +30,10 @@ fn main() {
     // redraws the clock, then suspends again. Touching the screen during the
     // awake window resets the 10s countdown, like the device's normal idle
     // timer.
-    backend.set_wake_schedule(Some(WakeSchedule {
+    let backend = backend.set_wake_schedule(WakeSchedule {
         wake_interval: Duration::from_secs(60),
         stay_awake: Duration::from_secs(10),
-    }));
+    });
 
     // Refresh the displayed time the instant we resume, before the next
     // render — without this, the screen would show the pre-suspend time

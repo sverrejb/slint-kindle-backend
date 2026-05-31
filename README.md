@@ -56,6 +56,48 @@ fn main() {
 
 Reference each font in `.slint` by its **real family name** (the one in the font's `name` table), not the filename. `DancingScript-Regular.ttf` for instance reports itself as `"Dancing Script"`, so the .slint must say `font-family: "Dancing Script"`. If a glyph fails to render, that mismatch is the first thing to check — `fc-query font.ttf` or `otfinfo --info font.ttf` will show the family string the font advertises.
 
+## Battery life: Wake from suspend with a schedule.
+
+By default the event loop blocks in `poll(2)` when idle, so the system idles but doesn't enter the deep suspend-to-RAM state that `powerd` would normally use. For prolonged stand-by applications that you want to still update the display, opt in to a wake schedule so the device actually sleeps between updates and wakes on its own to refresh:
+
+```rust
+use std::time::Duration;
+use slint_backend_kindle::WakeSchedule;
+
+fn main() {
+    let backend = slint_backend_kindle::install(FONT)
+        .expect("failed to install Kindle backend");
+    let app = AppWindow::new().expect("failed to create window");
+
+    // After 30s of no touch, suspend to RAM. Wake every 5 minutes to refresh.
+    let backend = backend.set_wake_schedule(WakeSchedule {
+        wake_interval: Duration::from_secs(5 * 60),
+        stay_awake: Duration::from_secs(30),
+    });
+
+    // Optional: run something each time the device wakes, like polling an API.
+    backend.on_wake(|| {
+        refresh_data();
+    });
+
+    app.run().expect("event loop error");
+}
+```
+
+Touch activity during the awake window resets `stay_awake`, exactly like the device's normal idle timer. The cycle suppresses itself while Slint animations or queued event-loop closures are pending, so it never interrupts active UI work.
+
+`set_wake_schedule` consumes the backend and returns a `KindleBackend<Scheduled>`. `on_wake` is only available on that scheduled form — you can't register a wake callback without first configuring a schedule. Call `set_wake_schedule` again on the scheduled backend to change the schedule at runtime, or `clear_wake_schedule()` to disable suspension entirely.
+
+### Tips for `on_wake()`
+
+- The callback runs **synchronously on the UI thread** before the next render. For HTTP calls etc you probably want to spawn a background thread and marshal results back via `slint::invoke_from_event_loop`.
+- **Wifi reconnects ~3–10 s after each resume.** Don't expect networking to work on the first attempt. Retry with backoff inside your callback, or add a delay before doing anything network-related.
+- **Slint timers still fire on resume** (any timer whose deadline elapsed during sleep ticks once), but they don't align with `wake_interval`. If you specifically need work done at each wake, put it in `on_wake`, don't rely on a `Timer::Repeated` matching the schedule.
+
+### Notes when developing and testing 
+
+- **Connecting via USB cable seems blocks suspend.** When the device plugged in via USBNetwork (or just plugged in as USBMS) it seemed for me to not go into deep suspend.  Deploy the binary, then physically unplug if you are testing if suspend-to-ram is working properly.
+
 ## Cross-compiling for the Kindle
 
 The Kindle runs an ARMv7 musl userland. Recommended toolchain:
@@ -80,6 +122,8 @@ So far, the backend has been tested to work on:
 * Examples
 * Better device support
 * Font discovery instead of hard coded default
+* Physical button input as activity (resets `stay_awake` like touches do)
+* Optional `wait_for_link_up()` helper for `on_wake` callbacks that need wifi
 
 ## License
 
