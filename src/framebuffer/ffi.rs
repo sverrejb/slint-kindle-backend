@@ -2,13 +2,12 @@
 
 // Standard Linux framebuffer ioctl numbers (see <linux/fb.h>).
 // Typed as c_ulong (not libc::Ioctl) so the crate still type-checks on
-// non-Linux dev hosts where libc::Ioctl isn't defined; `as _` at the call
-// site coerces to whatever the platform's ioctl request type is.
+// non-Linux dev hosts where libc::Ioctl isn't defined, like macos
 pub(super) const FBIOGET_VSCREENINFO: libc::c_ulong = 0x4600;
 pub(super) const FBIOGET_FSCREENINFO: libc::c_ulong = 0x4602;
 
 // These structs mirror the kernel's `fb_var_screeninfo` and `fb_fix_screeninfo`.
-// We only read from them - the fields we care about are `xres`, `yres` (visible
+// We only read from them, fields we care about are `xres`, `yres` (visible
 // resolution) and `line_length` (stride in bytes per row, which may be larger
 // than xres due to alignment padding).
 
@@ -110,9 +109,7 @@ pub(super) struct UpdateRequest {
 // The ioctl number was confirmed by stracing `eips` on a real device.
 pub(super) const MXCFB_SEND_UPDATE: libc::c_ulong = 0x4048_462e;
 
-// _IOWR('F', 0x2f, struct mxcfb_update_marker_data) — 8 bytes (marker + collision_test).
-// Blocks until the EPDC has finished applying the update with this marker.
-// Used before suspend-to-RAM so the panel doesn't latch mid-refresh on the way down.
+// Blocks until the EPDC has finished applying the update with a given marker.
 pub(super) const MXCFB_WAIT_FOR_UPDATE_COMPLETE: libc::c_ulong = 0xc008_462f;
 
 #[repr(C)]

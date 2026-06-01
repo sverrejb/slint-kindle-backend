@@ -1,9 +1,10 @@
 use std::ops::Range;
 use std::os::fd::AsRawFd;
+use std::path::Path;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, Instant};
 
 use slint::Rgb8Pixel;
 use slint::platform::software_renderer::{
@@ -77,6 +78,51 @@ impl KindlePlatform {
             on_wake,
         })
     }
+
+    /// Suspend the device to RAM once it's been idle for `stay_awake` with no
+    /// pending work, then arm the wakealarm to bring it back. Returns `true`
+    /// if a suspend cycle ran (the caller should restart the event loop).
+    fn suspend_if_idle(
+        &self,
+        frame_buffer: &Framebuffer,
+        wakealarm: Option<&Path>,
+        last_interaction: &mut Instant,
+    ) -> bool {
+        let (Some(schedule), Some(wakealarm_path)) = (
+            *self.wake_schedule.lock().expect("wake schedule poisoned"),
+            wakealarm,
+        ) else {
+            return false;
+        };
+
+        // Pending Slint timers don't block suspend: they'll just fire on
+        // resume (a 1 Hz clock timer would otherwise pin the device awake).
+        let nothing_pending = !self.window.has_active_animations()
+            && self
+                .queue
+                .lock()
+                .expect("event loop closure queue poisoned")
+                .is_empty();
+        if last_interaction.elapsed() < schedule.stay_awake || !nothing_pending {
+            return false;
+        }
+
+        frame_buffer.wait_for_update_complete();
+
+        let _ = power::arm_wakealarm(wakealarm_path, schedule.wake_interval);
+        let _ = power::suspend_to_mem();
+
+        // Start a fresh stay_awake window so the consumer's app
+        // gets at least that long to react.
+        *last_interaction = Instant::now();
+        // Fire the consumer's on-wake callback (if any) before any rendering
+        // this cycle, so e.g. an HTTP poll runs before the next draw shows
+        // stale data.
+        if let Some(callback) = self.on_wake.borrow_mut().as_mut() {
+            callback();
+        }
+        true
+    }
 }
 
 impl Platform for KindlePlatform {
@@ -121,86 +167,9 @@ impl Platform for KindlePlatform {
         let mut last_interaction = Instant::now();
 
         loop {
-            // Suspend cycle: only triggers if the consumer opted in via
-            // set_wake_schedule and we found a writable wakealarm. Touches
-            // reset last_interaction, so user interaction always wins over the
-            // stay_awake countdown.
-            if let (Some(schedule), Some(wakealarm_path)) = (
-                *self.wake_schedule.lock().expect("wake schedule poisoned"),
-                wakealarm.as_ref(),
-            ) {
-                // Pending Slint timers don't block suspend: they'll just fire on
-                // resume (a 1 Hz clock timer would otherwise pin the device awake).
-                // Animations and queued closures do block — animations want to
-                // play out smoothly, and a queued closure is pending main-thread
-                // work the app expects to run.
-                let nothing_pending = !self.window.has_active_animations()
-                    && self
-                        .queue
-                        .lock()
-                        .expect("event loop closure queue poisoned")
-                        .is_empty();
-                if last_interaction.elapsed() >= schedule.stay_awake && nothing_pending {
-                    frame_buffer.wait_for_update_complete();
-
-                    if let Err(e) =
-                        power::arm_wakealarm(wakealarm_path, schedule.wake_interval)
-                    {
-                        eprintln!(
-                            "[slint-kindle] arm_wakealarm failed: {e} (raw_os_error={:?})",
-                            e.raw_os_error()
-                        );
-                    }
-
-                    // Time the suspend write using SystemTime (wall clock),
-                    // NOT Instant. Rust's Instant uses CLOCK_MONOTONIC which
-                    // on this kernel does not advance while the system is
-                    // suspended — so a real 60s sleep would show as ~1s of
-                    // process time and look like a failed suspend. SystemTime
-                    // uses CLOCK_REALTIME, which keeps ticking through
-                    // suspend, giving us the actual wall-clock duration.
-                    let suspend_start = SystemTime::now();
-                    let suspend_result = power::suspend_to_mem();
-                    let suspend_elapsed = suspend_start
-                        .elapsed()
-                        .unwrap_or(Duration::ZERO);
-
-                    match suspend_result {
-                        Ok(()) if suspend_elapsed < Duration::from_secs(2) => {
-                            eprintln!(
-                                "[slint-kindle] suspend returned ok but only after {} ms — kernel likely rejected the transition (active wakelock?)",
-                                suspend_elapsed.as_millis()
-                            );
-                            log_active_wakelocks();
-                        }
-                        Ok(()) => {
-                            eprintln!(
-                                "[slint-kindle] suspend slept for {} s (requested {} s)",
-                                suspend_elapsed.as_secs(),
-                                schedule.wake_interval.as_secs()
-                            );
-                        }
-                        Err(e) => {
-                            eprintln!(
-                                "[slint-kindle] suspend_to_mem failed: {e} (raw_os_error={:?}, returned after {} ms)",
-                                e.raw_os_error(),
-                                suspend_elapsed.as_millis()
-                            );
-                            log_active_wakelocks();
-                        }
-                    }
-
-                    // We just woke. Start a fresh stay_awake window so the
-                    // consumer's app gets at least that long to react.
-                    last_interaction = Instant::now();
-                    // Fire the consumer's on-wake callback (if any) before
-                    // any rendering this cycle, so e.g. an HTTP poll runs
-                    // before the next draw shows stale data.
-                    if let Some(cb) = self.on_wake.borrow_mut().as_mut() {
-                        cb();
-                    }
-                    continue;
-                }
+            // A suspend cycle restarts the loop with a fresh stay-awake window.
+            if self.suspend_if_idle(&frame_buffer, wakealarm.as_deref(), &mut last_interaction) {
+                continue;
             }
 
             // Wait for touch event or wakeup from application thread.
@@ -230,8 +199,8 @@ impl Platform for KindlePlatform {
                 },
             ];
 
-            // Block until an fd has activity or the timeout expires. Retry on
-            // signals (EINTR), bail on any other error.
+            // Block until an fd has activity or the timeout expires.
+            // Retry on EINTR, bail on any other error.
             // SAFETY: fds is a valid 2-element array while poll runs.
             let poll_result =
                 unsafe { libc::poll(file_descriptors.as_mut_ptr(), file_descriptors.len() as libc::nfds_t, timeout_ms) };
@@ -267,15 +236,13 @@ impl Platform for KindlePlatform {
                 }
             }
 
-            // Check for quit before doing more work — a screen refresh takes a
-            // noticeable chunk of time on E-ink and we'd rather skip it on the way out.
+            // Check early for quit before doing more work
             if self.quit_flag.load(Ordering::SeqCst) {
                 break;
             }
 
             // Touch activity counts as user interaction, so it resets the
-            // suspend countdown — under a wake schedule this is what keeps
-            // the device awake while the user is using it.
+            // suspend countdown
             if file_descriptors[0].revents & libc::POLLIN != 0 {
                 last_interaction = Instant::now();
             }
@@ -294,80 +261,6 @@ impl Platform for KindlePlatform {
         }
 
         Ok(())
-    }
-}
-
-/// Dump kernel-side wakeup sources to stderr so a failed suspend has context.
-///
-/// On Kindles `/sys/power/wake_lock` (the Android-derived userspace wakelock
-/// interface) typically doesn't exist — the kernel instead exposes wakeup
-/// sources through debugfs. We probe several paths and surface whichever
-/// are present, filtered to *active* sources to keep the output compact.
-fn log_active_wakelocks() {
-    // Old-style userspace wakelocks. On Kindle this is usually ENOENT but we
-    // try anyway in case some firmware build enables it.
-    match std::fs::read_to_string("/sys/power/wake_lock") {
-        Ok(locks) => {
-            let trimmed = locks.trim();
-            eprintln!(
-                "[slint-kindle] /sys/power/wake_lock: {}",
-                if trimmed.is_empty() { "(empty)" } else { trimmed }
-            );
-        }
-        Err(_) => {} // expected on Kindle; don't spam the log
-    }
-
-    // Kernel wakeup-source table (newer kernels). Columns are:
-    //   name  active_count  event_count  wakeup_count  expire_count
-    //   active_since  total_time  max_time  last_change  prevent_suspend_time
-    // A non-zero `active_since` means this source is currently blocking suspend.
-    log_active_rows(
-        "/sys/kernel/debug/wakeup_sources",
-        "wakeup_sources",
-        /*active_since_col=*/ 5,
-    );
-
-    // Older kernel interface — same columns shifted by one (no active_count).
-    log_active_rows("/proc/wakelocks", "wakelocks", 4);
-
-    if let Ok(count) = std::fs::read_to_string("/sys/power/wakeup_count") {
-        eprintln!("[slint-kindle] /sys/power/wakeup_count: {}", count.trim());
-    }
-}
-
-/// Read a wakelock-style table, parse the header + body, and print only rows
-/// whose `active_since_col` value is non-zero. Format mirrors what the kernel
-/// already gives us — first whitespace-separated field is the source name.
-fn log_active_rows(path: &str, label: &str, active_since_col: usize) {
-    let content = match std::fs::read_to_string(path) {
-        Ok(c) => c,
-        Err(e) => {
-            // Only complain if it's something other than ENOENT — missing is
-            // expected on kernels that don't expose this interface.
-            if e.kind() != std::io::ErrorKind::NotFound {
-                eprintln!("[slint-kindle] {label} ({path}) unreadable: {e}");
-            }
-            return;
-        }
-    };
-    let mut lines = content.lines();
-    let _header = lines.next();
-    let mut active = Vec::new();
-    for line in lines {
-        let cols: Vec<&str> = line.split_whitespace().collect();
-        let active_since = cols
-            .get(active_since_col)
-            .and_then(|s| s.parse::<u64>().ok())
-            .unwrap_or(0);
-        if active_since > 0 {
-            let name = cols.first().copied().unwrap_or("?");
-            active.push(format!("{name} (active_since={active_since})"));
-        }
-    }
-    if active.is_empty() {
-        eprintln!("[slint-kindle] {label}: no active sources");
-    } else {
-        eprintln!("[slint-kindle] {label} active: {}", active.join(", "));
     }
 }
 

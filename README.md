@@ -7,6 +7,13 @@ Slint backend for jailbroken Kindles. Allows for running Slint GUIS on Kindle de
 
 <img src="https://raw.githubusercontent.com/sverrejb/slint-kindle-backend/main/demo.webp" alt="Slint app running on a Kindle Paperwhite" width="750">
 
+## Features
+
+* Idle event loop: blocks in `poll(2)` when there's nothing to do, so the SoC can idle instead of burning cpu cycles.
+* Suspend-and-wake cycle: lets the device sleep between periodic display updates. Useful for long battery life applications.
+* E-ink rendering via the EPDC driver: partial refreshes for dirty regions and full refreshes to clear ghosting.
+* Custom fonts: load a default font at startup and register additional typefaces at runtime.
+
 ## Usage
 
 For suggestions on how to set up your dev environment, see the [getting started doc](https://github.com/sverrejb/slint-kindle-backend/blob/main/getting_started.md).
@@ -56,9 +63,9 @@ fn main() {
 
 Reference each font in `.slint` by its **real family name** (the one in the font's `name` table), not the filename. `DancingScript-Regular.ttf` for instance reports itself as `"Dancing Script"`, so the .slint must say `font-family: "Dancing Script"`. If a glyph fails to render, that mismatch is the first thing to check — `fc-query font.ttf` or `otfinfo --info font.ttf` will show the family string the font advertises.
 
-## Battery life: Wake from suspend with a schedule.
+## Long battery life: Wake from suspend with a schedule.
 
-By default the event loop blocks in `poll(2)` when idle, so the system idles but doesn't enter the deep suspend-to-RAM state that `powerd` would normally use. For prolonged stand-by applications that you want to still update the display, opt in to a wake schedule so the device actually sleeps between updates and wakes on its own to refresh:
+By default the event loop blocks in `poll(2)` when idle, so the system idles but doesn't enter the deep suspend-to-RAM state that `powerd` would normally use. For prolonged stand-by applications that you want to still update the display periodically, opt in to a wake schedule so the device actually sleeps between updates and wakes on its own to refresh:
 
 ```rust
 use std::time::Duration;
@@ -75,7 +82,7 @@ fn main() {
         stay_awake: Duration::from_secs(30),
     });
 
-    // Optional: run something each time the device wakes, like polling an API.
+    // Optional: run something each time the device wakes, like polling an API to update your view or whatever.
     backend.on_wake(|| {
         refresh_data();
     });
@@ -86,7 +93,7 @@ fn main() {
 
 Touch activity during the awake window resets `stay_awake`, exactly like the device's normal idle timer. The cycle suppresses itself while Slint animations or queued event-loop closures are pending, so it never interrupts active UI work.
 
-`set_wake_schedule` consumes the backend and returns a `KindleBackend<Scheduled>`. `on_wake` is only available on that scheduled form — you can't register a wake callback without first configuring a schedule. Call `set_wake_schedule` again on the scheduled backend to change the schedule at runtime, or `clear_wake_schedule()` to disable suspension entirely.
+`set_wake_schedule` consumes the backend and returns a `KindleBackend<Scheduled>`. `on_wake` is only available on that scheduled form. Call `set_wake_schedule` again on the scheduled backend to change the schedule at runtime, or `clear_wake_schedule()` to disable suspension entirely.
 
 ### Tips for `on_wake()`
 
@@ -100,12 +107,12 @@ Touch activity during the awake window resets `stay_awake`, exactly like the dev
 
 ## Cross-compiling for the Kindle
 
-The Kindle runs an ARMv7 musl userland. Recommended toolchain:
+The Kindle runs an ARMv7 musl userland. Suggested toolchain:
 
 ```sh
 rustup target add armv7-unknown-linux-musleabihf
 cargo install cargo-zigbuild
-# brew install zig    # or your platform's equivalent
+brew install zig    # or your platform's equivalent
 
 cargo zigbuild --release --target armv7-unknown-linux-musleabihf
 ```
@@ -122,7 +129,6 @@ So far, the backend has been tested to work on:
 * Examples
 * Better device support
 * Font discovery instead of hard coded default
-* Physical button input as activity (resets `stay_awake` like touches do)
 * Optional `wait_for_link_up()` helper for `on_wake` callbacks that need wifi
 
 ## License
