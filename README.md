@@ -11,7 +11,7 @@ Slint backend for jailbroken Kindles. Allows for running Slint GUIS on Kindle de
 
 * Idle event loop: blocks in `poll(2)` when there's nothing to do, so the SoC can idle instead of burning cpu cycles.
 * Suspend-and-wake cycle: lets the device sleep between periodic display updates. Useful for long battery life applications.
-* E-ink rendering via the EPDC driver: partial refreshes for dirty regions and full refreshes to clear ghosting.
+* E-ink rendering via the EPDC driver: No dependency on X11 etc.
 * Custom fonts: load a default font at startup and register additional typefaces at runtime.
 
 ## Usage
