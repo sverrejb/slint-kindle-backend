@@ -126,10 +126,11 @@ So far, the backend has been tested to work on:
  
 
 ## Roadmap
-* Examples
-* Better device support
+* More and better examples
+* Better device support / testing of device support
 * Font discovery instead of hard coded default
 * Optional `wait_for_link_up()` helper for `on_wake` callbacks that need wifi
+* User-facing refresh display functions for manual clearing of ghosting etc.
 
 ## License
 
