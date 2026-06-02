@@ -1,7 +1,7 @@
 //! Sysfs-driven RTC wakeup and suspend-to-RAM.
 //!
 //! Powerd is not stopped — the framework keeps running, we just preempt
-//! powerd's own (much longer) idle-to-suspend timer.
+//! powerd's own (probably) longer idle-to-suspend timer.
 
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};

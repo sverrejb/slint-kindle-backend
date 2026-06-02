@@ -8,7 +8,7 @@ use slint_backend_kindle::WakeSchedule;
 
 slint::include_modules!();
 
-static LIBERATION_SANS: &[u8] = include_bytes!("../fonts/LiberationSans-Regular.ttf");
+static LIBERATION_SANS: &[u8] = include_bytes!("../../LiberationSans-Regular.ttf");
 
 const CAT_FACTS_URL: &str = "https://catfact.ninja/fact";
 const MAX_FETCH_ATTEMPTS: u32 = 6;

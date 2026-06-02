@@ -1,8 +1,11 @@
-import { VerticalBox, HorizontalBox } from "std-widgets.slint";
-
 // Counter demo — all sizes are proportional to the window dimensions so the
 // layout works on any Kindle (600×800 Touch, 1072×1448 Paperwhite, etc.).
 // The platform backend sets the window size from the framebuffer geometry.
+//
+// Elements are positioned absolutely (rather than with VerticalBox/
+// HorizontalBox) so the proportional sizes can reference root.width/
+// root.height without forming a layout binding loop — a layout's content size
+// depends on its children, which here depend on the window size.
 export component AppWindow inherits Window {
     background: white;
 
@@ -33,65 +36,62 @@ export component AppWindow inherits Window {
         }
     }
 
-    VerticalBox {
-        alignment: center;
-        spacing: root.height * 0.06;  // 6% of height between elements
+    // Counter value — 15% of width for readable text
+    Text {
+        x: 0;
+        y: root.height * 0.30;
+        width: parent.width;
+        text: "count: " + root.count;
+        font-size: root.width * 0.15;
+        color: black;
+        horizontal-alignment: center;
+    }
 
-        // Counter value — 15% of width for readable text
-        Text {
-            text: "count: " + root.count;
-            font-size: root.width * 0.15;
-            color: black;
-            horizontal-alignment: center;
+    // Decrement button — 40% width × 14% height, left of centre
+    Rectangle {
+        x: root.width * 0.08;
+        y: root.height * 0.50;
+        width: root.width * 0.4;
+        height: root.height * 0.14;
+        border-width: root.width * 0.005;
+        border-color: black;
+        border-radius: root.width * 0.015;
+        background: dec-touch.pressed ? #cccccc : white;
+
+        dec-touch := TouchArea {
+            clicked => { root.count -= 1; }
         }
 
-        HorizontalBox {
-            alignment: center;
-            spacing: root.width * 0.04;  // 4% gap between buttons
+        Text {
+            text: "-1";
+            font-size: root.width * 0.06;
+            color: black;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
 
-            // Decrement button — 40% width × 14% height
-            Rectangle {
-                width: root.width * 0.4;
-                height: root.height * 0.14;
-                border-width: root.width * 0.005;
-                border-color: black;
-                border-radius: root.width * 0.015;
-                background: dec-touch.pressed ? #cccccc : white;
+    // Increment button — 40% width × 14% height, right of centre
+    Rectangle {
+        x: root.width * 0.52;
+        y: root.height * 0.50;
+        width: root.width * 0.4;
+        height: root.height * 0.14;
+        border-width: root.width * 0.005;
+        border-color: black;
+        border-radius: root.width * 0.015;
+        background: inc-touch.pressed ? #cccccc : white;
 
-                dec-touch := TouchArea {
-                    clicked => { root.count -= 1; }
-                }
+        inc-touch := TouchArea {
+            clicked => { root.count += 1; }
+        }
 
-                Text {
-                    text: "-1";
-                    font-size: root.width * 0.06;
-                    color: black;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                }
-            }
-
-            // Increment button — 40% width × 14% height
-            Rectangle {
-                width: root.width * 0.4;
-                height: root.height * 0.14;
-                border-width: root.width * 0.005;
-                border-color: black;
-                border-radius: root.width * 0.015;
-                background: inc-touch.pressed ? #cccccc : white;
-
-                inc-touch := TouchArea {
-                    clicked => { root.count += 1; }
-                }
-
-                Text {
-                    text: "+1";
-                    font-size: root.width * 0.06;
-                    color: black;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                }
-            }
+        Text {
+            text: "+1";
+            font-size: root.width * 0.06;
+            color: black;
+            horizontal-alignment: center;
+            vertical-alignment: center;
         }
     }
 }

@@ -6,7 +6,7 @@ slint::slint! {
     }
 }
 
-static FONT: &[u8] = include_bytes!("../fonts/LiberationSans-Regular.ttf");
+static FONT: &[u8] = include_bytes!("../../LiberationSans-Regular.ttf");
 
 fn main() {
     slint_backend_kindle::install(FONT).expect("failed to install Kindle backend");

@@ -1,6 +1,6 @@
 slint::include_modules!();
 
-static LIBERATION_SANS: &[u8] = include_bytes!("../fonts/LiberationSans-Regular.ttf");
+static LIBERATION_SANS: &[u8] = include_bytes!("../../LiberationSans-Regular.ttf");
 
 fn main() {
     slint_backend_kindle::install(LIBERATION_SANS)
