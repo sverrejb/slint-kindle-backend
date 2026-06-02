@@ -9,16 +9,16 @@ Slint backend for jailbroken Kindles. Allows for running Slint GUIS on Kindle de
 
 ## Features
 
-* Idle event loop: blocks in `poll(2)` when there's nothing to do, so the SoC can idle instead of burning cpu cycles.
-* Suspend-and-wake cycle: lets the device sleep between periodic display updates. Useful for long battery life applications.
-* E-ink rendering via the EPDC driver: No dependency on X11 etc.
-* Custom fonts: load a default font at startup and register additional typefaces at runtime.
+* **Idle event loop**: blocks in `poll(2)` when there's nothing to do, so the SoC can idle instead of burning cpu cycles.
+* **Suspend-and-wake cycle**: lets the device sleep between periodic display updates. Useful for long battery life applications.
+* **E-ink rendering via the EPDC driver**: No dependency on X11 etc.
+* **Custom fonts**: support for configuring a default font + additional ones.
 
 ## Usage
 
 For suggestions on how to set up your dev environment, see the [getting started doc](https://github.com/sverrejb/slint-kindle-backend/blob/main/getting_started.md).
 
-Add the crate to your app:
+Add the Slint crate and the backend to your app:
 
 ```sh
 cargo add slint --no-default-features --features compat-1-2,std,renderer-software
@@ -30,7 +30,13 @@ Slint is added with `--no-default-features` and only `compat-1-2`, `std`, and `r
 Bundle a TTF/OTF font with your app and pass it to `install()` at startup. **The font is required**. The various Kindle models has no fontconfig and no default location for system fonts, so Slint's software renderer would panic on the first fallback query without one.
 
 ```rust
-slint::include_modules!();
+slint::slint! {
+    export component AppWindow inherits Window {
+        Text {
+            text: "Hello from Slint on Kindle";
+        }
+    }
+}
 
 static FONT: &[u8] = include_bytes!("../fonts/LiberationSans-Regular.ttf");
 
@@ -40,6 +46,8 @@ fn main() {
     app.run().expect("event loop error");
 }
 ```
+
+The UI is declared inline with the `slint::slint!` macro, so this example needs no `.slint` file or `build.rs`. For a "real" application you'd typically keep the markup in a `.slint` file and pull it in with `slint::include_modules!()` instead. See the [Slint documentation](https://docs.slint.dev/latest/docs/slint/) for how to build with Slint.
 
 The font becomes the default, so Slint widgets that don't specify `font-family` render correctly. You can still reference the font by its real family name in your `.slint` files (e.g. `font-family: "Liberation Sans"`).
 
