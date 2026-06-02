@@ -1,0 +1,25 @@
+[package]
+name = "slint-kindle-cross-platform"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[build-dependencies]
+slint-build = "1.16"
+
+# On the Kindle the app renders to the E-ink framebuffer through this crate's
+# software-renderer backend. The cfg matches the device's target triple
+# (armv7-unknown-linux-musleabihf): 32-bit ARM (`arm`, not `aarch64`) + Linux +
+# musl. That deliberately excludes ARM dev machines — aarch64 laptops fail the
+# `arm` check, and glibc boards like a Raspberry Pi fail the `musl` check — so
+# they take the desktop branch below.
+[target.'cfg(all(target_arch = "arm", target_os = "linux", target_env = "musl"))'.dependencies]
+slint = { version = "1.16", default-features = false, features = ["compat-1-2", "std", "renderer-software"] }
+slint-backend-kindle = { path = "../.." }
+
+# Everywhere else (your Mac/PC) the same code runs on Slint's stock winit
+# backend, so you can iterate in a desktop window without flashing a device.
+# These desktop-only deps are target-gated so they never reach the musl
+# cross-compile, which has no system GL / windowing libraries to link against.
+[target.'cfg(not(all(target_arch = "arm", target_os = "linux", target_env = "musl")))'.dependencies]
+slint = "1.16"

@@ -1,0 +1,60 @@
+// Sizes are proportional to the window so the same layout works at the Kindle's
+// framebuffer geometry (set by the backend) and at the desktop preview size
+// below. preferred-width/height only take effect on desktop — the Kindle
+// backend overrides the window size from the framebuffer.
+//
+// Everything is positioned absolutely rather than via a layout: deriving
+// font-size from root.width inside a layout would feed the text's size back
+// into the layout that sizes it, which Slint flags as a binding loop.
+export component AppWindow inherits Window {
+    background: white;
+    preferred-width: 600px;
+    preferred-height: 800px;
+
+    in property <string> platform-name: "unknown";
+    callback quit();
+
+    Text {
+        x: 0;
+        y: root.height * 0.4;
+        width: parent.width;
+        text: "Slint, anywhere";
+        font-size: root.width * 0.09;
+        color: black;
+        horizontal-alignment: center;
+    }
+
+    Text {
+        x: 0;
+        y: root.height * 0.52;
+        width: parent.width;
+        text: "running on: " + root.platform-name;
+        font-size: root.width * 0.05;
+        color: black;
+        horizontal-alignment: center;
+    }
+
+    // Quit button — top-right corner, 10% of width square.
+    Rectangle {
+        x: parent.width - self.width - root.width * 0.03;
+        y: root.height * 0.02;
+        width: root.width * 0.1;
+        height: root.width * 0.1;
+        border-width: root.width * 0.005;
+        border-color: black;
+        border-radius: root.width * 0.015;
+        background: quit-touch.pressed ? #cccccc : white;
+
+        quit-touch := TouchArea {
+            clicked => { root.quit(); }
+        }
+
+        Text {
+            text: "×";
+            font-size: root.width * 0.06;
+            color: black;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+}
