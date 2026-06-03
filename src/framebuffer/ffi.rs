@@ -109,6 +109,9 @@ pub(super) struct UpdateRequest {
 // The ioctl number was confirmed by stracing `eips` on a real device.
 pub(super) const MXCFB_SEND_UPDATE: libc::c_ulong = 0x4048_462e;
 
+// ioctl number for Kindle Paperwhite 10th gen, from strace.
+pub(super) const MXCFB_SEND_UPDATE_V2: libc::c_ulong = 0x4050_462e;
+
 // Blocks until the EPDC has finished applying the update with a given marker.
 pub(super) const MXCFB_WAIT_FOR_UPDATE_COMPLETE: libc::c_ulong = 0xc008_462f;
 

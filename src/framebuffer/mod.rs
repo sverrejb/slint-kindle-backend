@@ -5,9 +5,9 @@ use std::os::fd::AsRawFd;
 
 use ffi::{
     AlternateBuffer, FBIOGET_FSCREENINFO, FBIOGET_VSCREENINFO, FbFixScreeninfo, FbVarScreeninfo,
-    MXCFB_SEND_UPDATE, MXCFB_WAIT_FOR_UPDATE_COMPLETE, TEMP_USE_AMBIENT, UPDATE_MODE_FULL,
-    UPDATE_MODE_PARTIAL, UpdateMarkerData, UpdateRect, UpdateRequest, WAVEFORM_MODE_AUTO,
-    WAVEFORM_MODE_GC16,
+    MXCFB_SEND_UPDATE, MXCFB_SEND_UPDATE_V2, MXCFB_WAIT_FOR_UPDATE_COMPLETE, TEMP_USE_AMBIENT,
+    UPDATE_MODE_FULL, UPDATE_MODE_PARTIAL, UpdateMarkerData, UpdateRect, UpdateRequest,
+    WAVEFORM_MODE_AUTO, WAVEFORM_MODE_GC16,
 };
 
 /// Memory-mapped handle to the Kindle's e-ink framebuffer.
@@ -146,13 +146,21 @@ impl Framebuffer {
             },
         };
 
+        // Try original update command first, try modern address if that fails.
         unsafe {
-            libc::ioctl(
+            if libc::ioctl(
                 self.file.as_raw_fd(),
                 MXCFB_SEND_UPDATE as _,
                 &update as *const _,
-            );
-        }
+            ) == -1
+            {
+                libc::ioctl(
+                    self.file.as_raw_fd(),
+                    MXCFB_SEND_UPDATE_V2 as _,
+                    &update as *const _,
+                );
+            }
+        };
     }
 
     /// Full-screen GC16 refresh
