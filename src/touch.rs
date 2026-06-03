@@ -16,6 +16,7 @@ struct TouchInputEvent {
 const EVENT_SYNC: u16 = 0;
 const EVENT_ABSOLUTE_AXIS: u16 = 3;
 const SYNC_REPORT: u16 = 0;
+const TOUCH_SLOT: u16 = 0x2f;
 const TOUCH_POSITION_X: u16 = 0x35;
 const TOUCH_POSITION_Y: u16 = 0x36;
 const TOUCH_TRACKING_ID: u16 = 0x39;
@@ -51,7 +52,15 @@ struct InputAbsinfo {
 
 pub(crate) struct TouchInput {
     file_descriptor: libc::c_int,
-    tracking_id: i32,
+    // Protocol-B slot that the incoming ABS_MT_* events currently describe. The
+    // driver only emits ABS_MT_SLOT once a second finger appears, so the first
+    // contact is implicitly slot 0.
+    active_slot: i32,
+    // The slot we treat as "the pointer". Slint has no concept of more than one
+    // pointer, so we lock onto the first finger down and ignore the others until
+    // it lifts. Without this, a second finger's coordinates land in the same
+    // x/y and the pointer jitters back and forth between the two fingers.
+    tracked_slot: Option<i32>,
     x: f32,
     y: f32,
     pressed: bool,
@@ -91,7 +100,8 @@ impl TouchInput {
 
         Ok(Self {
             file_descriptor: fd,
-            tracking_id: -1,
+            active_slot: 0,
+            tracked_slot: None,
             x: 0.0,
             y: 0.0,
             pressed: false,
@@ -152,16 +162,27 @@ impl TouchInput {
     pub(crate) fn poll(&mut self, window: &MinimalSoftwareWindow) {
         while let Some(event) = self.read_event() {
             match (event.kind, event.code) {
-                (EVENT_ABSOLUTE_AXIS, TOUCH_POSITION_X) => {
+                (EVENT_ABSOLUTE_AXIS, TOUCH_SLOT) => {
+                    self.active_slot = event.value;
+                }
+                (EVENT_ABSOLUTE_AXIS, TOUCH_POSITION_X) if self.is_tracked_slot() => {
                     self.x = (event.value as f32) * self.screen_width / self.max_x;
                 }
-                (EVENT_ABSOLUTE_AXIS, TOUCH_POSITION_Y) => {
+                (EVENT_ABSOLUTE_AXIS, TOUCH_POSITION_Y) if self.is_tracked_slot() => {
                     self.y = (event.value as f32) * self.screen_height / self.max_y;
                 }
                 (EVENT_ABSOLUTE_AXIS, TOUCH_TRACKING_ID) => {
-                    self.tracking_id = event.value;
                     if event.value == -1 {
-                        self.release(window);
+                        // The finger in the active slot lifted. Only end the
+                        // stroke if it was the one we were following; a lifted
+                        // secondary finger must not release the pointer.
+                        if self.tracked_slot == Some(self.active_slot) {
+                            self.tracked_slot = None;
+                            self.release(window);
+                        }
+                    } else if self.tracked_slot.is_none() {
+                        // First finger down owns the pointer until it lifts.
+                        self.tracked_slot = Some(self.active_slot);
                     }
                 }
                 (EVENT_SYNC, SYNC_REPORT) => self.commit(window),
@@ -199,10 +220,15 @@ impl TouchInput {
         });
     }
 
+    /// Whether the slot the driver is currently describing is the one we follow.
+    fn is_tracked_slot(&self) -> bool {
+        self.tracked_slot == Some(self.active_slot)
+    }
+
     // Called when the driver signals batch of events is finished. Dispatch
     // a press if the finger just touched down, or a move if it was already down.
     fn commit(&mut self, window: &MinimalSoftwareWindow) {
-        if self.tracking_id < 0 {
+        if self.tracked_slot.is_none() {
             return;
         }
         let position = LogicalPosition::new(self.x, self.y);
