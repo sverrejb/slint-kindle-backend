@@ -131,6 +131,7 @@ The resulting binary is statically linked against musl and runs directly on the 
 So far, the backend has been tested to work on:
 * Kindle Paperwhite 7th gen.
 * Kindle Touch 4th gen
+* Kindle Paperwhite 10th gen
  
 
 ## Roadmap
