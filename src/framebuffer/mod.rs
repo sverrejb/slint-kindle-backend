@@ -7,7 +7,7 @@ use ffi::{
     AlternateBuffer, FBIOGET_FSCREENINFO, FBIOGET_VSCREENINFO, FbFixScreeninfo, FbVarScreeninfo,
     MXCFB_SEND_UPDATE, MXCFB_SEND_UPDATE_V2, MXCFB_WAIT_FOR_UPDATE_COMPLETE, TEMP_USE_AMBIENT,
     UPDATE_MODE_FULL, UPDATE_MODE_PARTIAL, UpdateMarkerData, UpdateRect, UpdateRequest,
-    WAVEFORM_MODE_AUTO, WAVEFORM_MODE_GC16,
+    WAVEFORM_MODE_AUTO, WAVEFORM_MODE_GC16, UpdateRequestRex
 };
 
 /// Memory-mapped handle to the Kindle's e-ink framebuffer.
@@ -154,13 +154,36 @@ impl Framebuffer {
                 &update as *const _,
             ) == -1
             {
+                let update = UpdateRequestRex {
+                    update_region: region,
+                    waveform_mode: waveform,
+                    update_mode: mode,
+                    update_marker: 1,
+                    temperature: TEMP_USE_AMBIENT,
+                    flags: 0,
+                    dither_mode: 0,
+                    quant_bit: 0,
+                    alternate_buffer: AlternateBuffer {
+                        physical_address: 0,
+                        width: 0,
+                        height: 0,
+                        update_region: UpdateRect {
+                            top: 0,
+                            left: 0,
+                            width: 0,
+                            height: 0,
+                        },
+                    },
+                    hist_bw_waveform_mode: 0,
+                    hist_gray_waveform_mode: 0,
+                };
                 libc::ioctl(
                     self.file.as_raw_fd(),
                     MXCFB_SEND_UPDATE_V2 as _,
                     &update as *const _,
                 );
             }
-        };
+        }
     }
 
     /// Full-screen GC16 refresh
