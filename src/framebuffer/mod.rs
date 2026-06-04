@@ -5,7 +5,7 @@ use std::os::fd::AsRawFd;
 
 use ffi::{
     AlternateBuffer, FBIOGET_FSCREENINFO, FBIOGET_VSCREENINFO, FbFixScreeninfo, FbVarScreeninfo,
-    MXCFB_SEND_UPDATE, MXCFB_SEND_UPDATE_V2, MXCFB_WAIT_FOR_UPDATE_COMPLETE, TEMP_USE_AMBIENT,
+    MXCFB_SEND_UPDATE, MXCFB_SEND_UPDATE_REX, MXCFB_WAIT_FOR_UPDATE_COMPLETE, TEMP_USE_AMBIENT,
     UPDATE_MODE_FULL, UPDATE_MODE_PARTIAL, UpdateMarkerData, UpdateRect, UpdateRequest,
     WAVEFORM_MODE_AUTO, WAVEFORM_MODE_GC16, UpdateRequestRex
 };
@@ -179,7 +179,7 @@ impl Framebuffer {
                 };
                 libc::ioctl(
                     self.file.as_raw_fd(),
-                    MXCFB_SEND_UPDATE_V2 as _,
+                    MXCFB_SEND_UPDATE_REX as _,
                     &update as *const _,
                 );
             }
