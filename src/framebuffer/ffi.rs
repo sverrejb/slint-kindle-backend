@@ -105,9 +105,27 @@ pub(super) struct UpdateRequest {
     pub(super) alternate_buffer: AlternateBuffer,
 }
 
+#[repr(C)]
+pub(super) struct UpdateRequestRex {
+    pub(super) update_region: UpdateRect,
+    pub(super) waveform_mode: u32,
+    pub(super) update_mode: u32,
+    pub(super) update_marker: u32,
+    pub(super) temperature: i32,
+    pub(super) flags: u32,
+    pub(super) dither_mode: i32,
+    pub(super) quant_bit: i32,
+    pub(super) alternate_buffer: AlternateBuffer,
+    pub(super) hist_bw_waveform_mode: u32,
+    pub(super) hist_gray_waveform_mode: u32,
+}
+
 // Kindle EPDC ioctl and constants.
 // The ioctl number was confirmed by stracing `eips` on a real device.
 pub(super) const MXCFB_SEND_UPDATE: libc::c_ulong = 0x4048_462e;
+
+// ioctl number for Kindle Paperwhite 10th gen, from strace.
+pub(super) const MXCFB_SEND_UPDATE_V2: libc::c_ulong = 0x4050_462e;
 
 // Blocks until the EPDC has finished applying the update with a given marker.
 pub(super) const MXCFB_WAIT_FOR_UPDATE_COMPLETE: libc::c_ulong = 0xc008_462f;
