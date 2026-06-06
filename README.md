@@ -7,14 +7,16 @@ Slint backend for jailbroken Kindles. Allows for running Slint GUIS on Kindle de
 
 <img src="https://raw.githubusercontent.com/sverrejb/slint-kindle-backend/main/demo.webp" alt="Slint app running on a Kindle Paperwhite" width="750">
 
+
 ## Features
 
+* **Custom fonts**: support for configuring a default font + additional ones.
 * **Idle event loop**: blocks in `poll(2)` when there's nothing to do, so the SoC can idle instead of burning cpu cycles.
 * **Suspend-and-wake cycle**: lets the device sleep between periodic display updates. Useful for long battery life applications.
 * **E-ink rendering via the EPDC driver**: No dependency on X11 etc.
-* **Custom fonts**: support for configuring a default font + additional ones.
+* **Pure black & white (bilevel) mode**: optional flicker-free rendering, so flicker less. Great for high-interaction UIs.
 
-## Usage
+## Usage and configuration
 
 For suggestions on how to set up your dev environment, see the [getting started doc](https://github.com/sverrejb/slint-kindle-backend/blob/main/getting_started.md).
 
@@ -71,7 +73,8 @@ fn main() {
 
 Reference each font in `.slint` by its **real family name** (the one in the font's `name` table), not the filename. `DancingScript-Regular.ttf` for instance reports itself as `"Dancing Script"`, so the .slint must say `font-family: "Dancing Script"`. If a glyph fails to render, that mismatch is the first thing to check — `fc-query font.ttf` or `otfinfo --info font.ttf` will show the family string the font advertises.
 
-## Long battery life: Wake from suspend with a schedule.
+
+### Long battery life: Wake from suspend with a schedule.
 
 By default the event loop blocks in `poll(2)` when idle, so the system idles but doesn't enter the deep suspend-to-RAM state that `powerd` would normally use. For prolonged stand-by applications that you want to still update the display periodically, opt in to a wake schedule so the device actually sleeps between updates and wakes on its own to refresh:
 
@@ -103,15 +106,38 @@ Touch activity during the awake window resets `stay_awake`, exactly like the dev
 
 `set_wake_schedule` consumes the backend and returns a `KindleBackend<Scheduled>`. `on_wake` is only available on that scheduled form. Call `set_wake_schedule` again on the scheduled backend to change the schedule at runtime, or `clear_wake_schedule()` to disable suspension entirely.
 
-### Tips for `on_wake()`
+#### Tips for `on_wake()`
 
 - The callback runs **synchronously on the UI thread** before the next render. For HTTP calls etc you probably want to spawn a background thread and marshal results back via `slint::invoke_from_event_loop`.
 - **Wifi reconnects ~3–10 s after each resume.** Don't expect networking to work on the first attempt. Retry with backoff inside your callback, or add a delay before doing anything network-related.
 - **Slint timers still fire on resume** (any timer whose deadline elapsed during sleep ticks once), but they don't align with `wake_interval`. If you specifically need work done at each wake, put it in `on_wake`, don't rely on a `Timer::Repeated` matching the schedule.
 
-### Notes when developing and testing 
+#### Notes when developing and testing 
 
 - **Connecting via USB cable seems blocks suspend.** When the device plugged in via USBNetwork (or just plugged in as USBMS) it seemed for me to not go into deep suspend.  Deploy the binary, then physically unplug if you are testing if suspend-to-ram is working properly.
+
+### Pure black and white (bilevel): flicker-free updates
+
+An E-ink panel can flip a pixel between pure black and white quickly and effortlessly, but showing any **grey** might **<sup>*</sup>** need a waveform that briefly drives the pixels *through black* before settling, causing a flicker. So grey fills, fading animations etc flashes on every update, while pure black-and-white content updates more cleanly.
+
+Pure black-and-white mode is available for applications where you want as little flickering as poissible. It thresholds every pixel to pure black or white (at the luma midpoint) before it reaches the framebuffer, so the panel only ever does its fast, flicker-free update:
+
+```rust
+fn main() {
+    let backend = slint_backend_kindle::install(FONT)
+        .expect("failed to install Kindle backend");
+    backend.set_black_and_white(true);   // pure black/white, flash-free
+
+    let app = AppWindow::new().expect("failed to create window");
+    app.run().expect("event loop error");
+}
+```
+
+Buttons, toggles, drawing, and anything that redraws on touch update instantly with no black flash, much closer to "instant" than a greyscale UI feels on E-ink.
+
+The trade-off is no anti-aliasing: text edges and thin strokes get harder/blockier, and any light grey is pushed to white (so it disappears). If you want to use this mode you should design for it: Use solid black and white.
+
+<sup>*</sup>That is, at least on the author's device. This might vary between models.
 
 ## Cross-compiling for the Kindle
 

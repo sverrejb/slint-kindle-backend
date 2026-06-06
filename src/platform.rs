@@ -26,6 +26,7 @@ struct KindleLineBuffer<'a> {
     fb: &'a mut Framebuffer,
     rgb_scratch: &'a mut [Rgb8Pixel],
     gray_scratch: &'a mut [u8],
+    black_and_white: bool,
 }
 
 impl LineBufferProvider for KindleLineBuffer<'_> {
@@ -44,7 +45,13 @@ impl LineBufferProvider for KindleLineBuffer<'_> {
         // BT.601 luma weights (0.299, 0.587, 0.114) scaled by 256 and bitshifted to devide by 256.
         let gray = &mut self.gray_scratch[range.clone()];
         for (g, p) in gray.iter_mut().zip(rgb.iter()) {
-            *g = ((77 * p.r as u32 + 150 * p.g as u32 + 29 * p.b as u32) >> 8) as u8;
+            let value = ((77 * p.r as u32 + 150 * p.g as u32 + 29 * p.b as u32) >> 8) as u8;
+            // Black-and-white mode forces pure black/white based on threshold
+            *g = if self.black_and_white {
+                if value < 128 { 0x00 } else { 0xff }
+            } else {
+                value
+            };
         }
 
         self.fb.write_line(line, range, gray);
@@ -59,12 +66,14 @@ pub(crate) struct KindlePlatform {
     quit_flag: Arc<AtomicBool>,
     pub(crate) wake_schedule: Arc<Mutex<Option<WakeSchedule>>>,
     pub(crate) on_wake: OnWakeCallback,
+    black_and_white: Arc<AtomicBool>,
 }
 
 impl KindlePlatform {
     pub(crate) fn new(
         wake_schedule: Arc<Mutex<Option<WakeSchedule>>>,
         on_wake: OnWakeCallback,
+        black_and_white: Arc<AtomicBool>,
     ) -> std::io::Result<Self> {
         let window = MinimalSoftwareWindow::new(RepaintBufferType::ReusedBuffer);
         let wakeup = wakeup::make_wakeup()?;
@@ -76,6 +85,7 @@ impl KindlePlatform {
             quit_flag: Arc::new(AtomicBool::new(false)),
             wake_schedule,
             on_wake,
+            black_and_white,
         })
     }
 
@@ -250,11 +260,13 @@ impl Platform for KindlePlatform {
             touch_input.poll(&self.window);
             slint::platform::update_timers_and_animations();
 
+            let black_and_white = self.black_and_white.load(Ordering::Relaxed);
             self.window.draw_if_needed(|renderer| {
                 let dirty = renderer.render_by_line(KindleLineBuffer {
                     fb: &mut frame_buffer,
                     rgb_scratch: &mut rgb_scratch,
                     gray_scratch: &mut gray_scratch,
+                    black_and_white,
                 });
                 frame_buffer.refresh_region(dirty.bounding_box_origin(), dirty.bounding_box_size());
             });

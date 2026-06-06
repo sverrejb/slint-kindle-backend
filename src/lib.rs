@@ -29,6 +29,7 @@ use slint::platform::software_renderer::MinimalSoftwareWindow;
 use std::cell::RefCell;
 use std::marker::PhantomData;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -65,6 +66,7 @@ pub struct KindleBackend<State = NoSchedule> {
     window: Rc<MinimalSoftwareWindow>,
     wake_schedule: Arc<Mutex<Option<WakeSchedule>>>,
     on_wake: OnWakeCallback,
+    black_and_white: Arc<AtomicBool>,
     _state: PhantomData<State>,
 }
 
@@ -81,12 +83,24 @@ impl<State> KindleBackend<State> {
             .map_err(|e| slint::PlatformError::Other(format!("{e}")))
     }
 
+    /// Render in **pure black and white** (bilevel) mode: force every pixel to
+    /// pure black or white, with no grey levels at all. Useful on devices where
+    /// greyscale rendering causes a flicker through black to be displayed.
+    ///
+    /// Off by default. A change takes effect on the next render, so set it
+    /// before your first window draw, toggling it later only affects pixels
+    /// redrawn after that.
+    pub fn set_black_and_white(&self, enabled: bool) {
+        self.black_and_white.store(enabled, Ordering::Relaxed);
+    }
+
     /// Switch state, keeping the same internals.
     fn into_state<Next>(self) -> KindleBackend<Next> {
         KindleBackend {
             window: self.window,
             wake_schedule: self.wake_schedule,
             on_wake: self.on_wake,
+            black_and_white: self.black_and_white,
             _state: PhantomData,
         }
     }
@@ -99,7 +113,7 @@ impl KindleBackend<NoSchedule> {
     /// wakes every `wake_interval` (or earlier, e.g. on a button press) so it
     /// can refresh.
     ///
-    /// Returns a [`Scheduled`] backend — the only one that lets you set
+    /// Returns a [`Scheduled`] backend that lets you set
     /// [`on_wake`](KindleBackend::on_wake).
     pub fn set_wake_schedule(self, schedule: WakeSchedule) -> KindleBackend<Scheduled> {
         *self.wake_schedule.lock().expect("wake schedule poisoned") = Some(schedule);
@@ -164,7 +178,8 @@ pub fn install(font_data: &[u8]) -> Result<KindleBackend, slint::PlatformError> 
 
     let wake_schedule = Arc::new(Mutex::new(None));
     let on_wake: OnWakeCallback = Rc::new(RefCell::new(None));
-    let platform = KindlePlatform::new(wake_schedule.clone(), on_wake.clone())
+    let black_and_white = Arc::new(AtomicBool::new(false));
+    let platform = KindlePlatform::new(wake_schedule.clone(), on_wake.clone(), black_and_white.clone())
         .map_err(|e| slint::PlatformError::Other(format!("failed to init Kindle platform: {e}")))?;
     let window = platform.window.clone();
     slint::platform::set_platform(Box::new(platform))
@@ -173,6 +188,7 @@ pub fn install(font_data: &[u8]) -> Result<KindleBackend, slint::PlatformError> 
         window,
         wake_schedule,
         on_wake,
+        black_and_white,
         _state: PhantomData,
     })
 }
