@@ -4269,6 +4269,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "slint-kindle-buttons"
+version = "0.1.0"
+dependencies = [
+ "slint",
+ "slint-backend-kindle",
+ "slint-build",
+]
+
+[[package]]
 name = "slint-kindle-cat-facts"
 version = "0.1.0"
 dependencies = [

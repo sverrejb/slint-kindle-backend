@@ -1,0 +1,88 @@
+// Finger-paint demo in pure black-and-white mode — drag to lay down ink. E-ink
+// can't show grey without a flash, so instead of fading, each blob simply
+// switches off. Once the finger lifts, the stroke rewinds itself: blobs vanish
+// oldest-first at the pace they were drawn, so a 1.5 s stroke clears in 1.5 s.
+// Sizes are proportional to the window dimensions so the layout works on any
+// Kindle (600×800 Touch, 1072×1448 Paperwhite, etc.); the backend sets the
+// window size from the framebuffer geometry.
+//
+// A "dab" is one sampled touch position. Rust owns the trail (it times the dabs
+// and drops them in order) and republishes it here as a list of positions.
+struct Dab {
+    x: length,
+    y: length,
+}
+
+export component AppWindow inherits Window {
+    background: white;
+
+    in property <[Dab]> dabs;
+    callback paint(length, length);
+    callback released();
+    callback quit();
+
+    // Full-screen capture area, declared first so it sits beneath the quit
+    // button — touches on the button reach the button, everything else paints.
+    paint-area := TouchArea {
+        pointer-event(ev) => {
+            if (ev.kind == PointerEventKind.down) {
+                root.paint(self.mouse-x, self.mouse-y);
+            } else if (ev.kind == PointerEventKind.up) {
+                root.released();
+            }
+        }
+        moved => {
+            root.paint(self.mouse-x, self.mouse-y);
+        }
+    }
+
+    // The trail. Each dab is a solid black circle — no opacity, since in
+    // black-and-white mode a blob is either on (black) or gone.
+    for dab in root.dabs: Rectangle {
+        width: root.width * 0.045;
+        height: self.width;
+        x: dab.x - self.width / 2;
+        y: dab.y - self.height / 2;
+        border-radius: self.width / 2;
+        background: black;
+    }
+
+    // Hint, only meaningful before the first stroke — it gets painted over.
+    Text {
+        x: 0;
+        y: root.height * 0.45;
+        width: parent.width;
+        text: "draw anywhere";
+        font-size: root.width * 0.05;
+        color: black;
+        horizontal-alignment: center;
+        visible: root.dabs.length == 0;
+    }
+
+    // Quit button — top-right corner, 10% of width square. Last child, so it is
+    // on top of the paint area and receives its own touches. Inverts to
+    // black-on-white while pressed (a grey press state would be invisible in
+    // black-and-white mode).
+    Rectangle {
+        x: root.width - self.width - root.width * 0.03;
+        y: root.height * 0.02;
+        width: root.width * 0.1;
+        height: root.width * 0.1;
+        border-width: root.width * 0.005;
+        border-color: black;
+        border-radius: root.width * 0.015;
+        background: quit-touch.pressed ? black : white;
+
+        quit-touch := TouchArea {
+            clicked => { root.quit(); }
+        }
+
+        Text {
+            text: "×";
+            font-size: root.width * 0.06;
+            color: quit-touch.pressed ? white : black;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+}

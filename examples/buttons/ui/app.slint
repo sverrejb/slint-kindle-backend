@@ -1,0 +1,225 @@
+// A playground of buttons, each with a different press indication, for feeling
+// out how the backend's adaptive E-ink refresh policy reacts to each style.
+// Sizes are proportional to the window so it works on any Kindle, and elements
+// are positioned absolutely (not via layouts) so those proportional sizes can
+// reference root dimensions without forming a layout binding loop.
+
+// Background fill changes on press — the original style. A grayscale change,
+// so the policy renders it with the light GL16 waveform.
+component ColorButton inherits Rectangle {
+    in property <string> label;
+    callback clicked;
+    border-width: self.width * 0.008;
+    border-color: black;
+    border-radius: self.height * 0.2;
+    background: touch.pressed ? #bbbbbb : white;
+    Text {
+        text: root.label;
+        color: black;
+        font-size: root.height * 0.36;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        width: 100%;
+        height: 100%;
+    }
+    touch := TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
+// Shrinks on press and springs back on release, like a physical key depressing.
+// The animation produces a short burst of small updates in one spot.
+component DepressButton inherits Rectangle {
+    in property <string> label;
+    callback clicked;
+    background: transparent;
+    visual := Rectangle {
+        width: parent.width * (touch.pressed ? 0.9 : 1.0);
+        height: parent.height * (touch.pressed ? 0.9 : 1.0);
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        border-width: parent.width * 0.008;
+        border-color: black;
+        border-radius: self.height * 0.2;
+        background: white;
+        animate width, height { duration: 90ms; easing: ease-out; }
+        Text {
+            text: root.label;
+            color: black;
+            font-size: parent.height * 0.36;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            width: 100%;
+            height: 100%;
+        }
+    }
+    touch := TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
+// Inverts to white-on-black while held. A purely bilevel change, so the policy
+// can use the fast 2-level DU waveform — useful to compare against GL16.
+component InvertButton inherits Rectangle {
+    in property <string> label;
+    callback clicked;
+    border-width: self.width * 0.008;
+    border-color: black;
+    border-radius: self.height * 0.2;
+    background: touch.pressed ? black : white;
+    Text {
+        text: root.label;
+        color: touch.pressed ? white : black;
+        font-size: root.height * 0.36;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        width: 100%;
+        height: 100%;
+    }
+    touch := TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
+// Border thickens inward while held — only the frame redraws, so the dirty
+// region is a thin ring rather than the whole button.
+component BorderButton inherits Rectangle {
+    in property <string> label;
+    callback clicked;
+    background: white;
+    border-color: black;
+    border-radius: self.height * 0.2;
+    border-width: touch.pressed ? self.width * 0.04 : self.width * 0.008;
+    animate border-width { duration: 80ms; easing: ease-out; }
+    Text {
+        text: root.label;
+        color: black;
+        font-size: root.height * 0.36;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        width: 100%;
+        height: 100%;
+    }
+    touch := TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
+// Label nudges down-right while held, like the button surface sinking.
+component SinkButton inherits Rectangle {
+    in property <string> label;
+    callback clicked;
+    background: white;
+    border-width: self.width * 0.008;
+    border-color: black;
+    border-radius: self.height * 0.2;
+    label-text := Text {
+        text: root.label;
+        color: black;
+        font-size: root.height * 0.36;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        width: 100%;
+        height: 100%;
+        x: touch.pressed ? root.width * 0.02 : 0;
+        y: touch.pressed ? root.height * 0.06 : 0;
+        animate x, y { duration: 70ms; easing: ease-out; }
+    }
+    touch := TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
+export component AppWindow inherits Window {
+    background: white;
+
+    callback quit();
+    in-out property <string> status: "tap a button";
+
+    // Quit button — top-right corner.
+    Rectangle {
+        x: root.width - self.width - root.width * 0.03;
+        y: root.height * 0.02;
+        width: root.width * 0.1;
+        height: root.width * 0.1;
+        border-width: root.width * 0.005;
+        border-color: black;
+        border-radius: root.width * 0.015;
+        background: quit-touch.pressed ? #bbbbbb : white;
+        Text {
+            text: "×";
+            font-size: root.width * 0.06;
+            color: black;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            width: 100%;
+            height: 100%;
+        }
+        quit-touch := TouchArea {
+            clicked => { root.quit(); }
+        }
+    }
+
+    Text {
+        x: 0;
+        y: root.height * 0.03;
+        width: root.width;
+        text: "press indications";
+        font-size: root.width * 0.05;
+        color: black;
+        horizontal-alignment: center;
+    }
+
+    // Five button styles, stacked. y starts below the title; each row is one
+    // button-height plus a gap.
+    ColorButton {
+        label: "color fill";
+        x: root.width * 0.15;
+        y: root.height * 0.14;
+        width: root.width * 0.7;
+        height: root.height * 0.11;
+        clicked => { root.status = "color fill"; }
+    }
+    DepressButton {
+        label: "depress";
+        x: root.width * 0.15;
+        y: root.height * 0.28;
+        width: root.width * 0.7;
+        height: root.height * 0.11;
+        clicked => { root.status = "depress"; }
+    }
+    InvertButton {
+        label: "invert";
+        x: root.width * 0.15;
+        y: root.height * 0.42;
+        width: root.width * 0.7;
+        height: root.height * 0.11;
+        clicked => { root.status = "invert"; }
+    }
+    BorderButton {
+        label: "border";
+        x: root.width * 0.15;
+        y: root.height * 0.56;
+        width: root.width * 0.7;
+        height: root.height * 0.11;
+        clicked => { root.status = "border"; }
+    }
+    SinkButton {
+        label: "sink";
+        x: root.width * 0.15;
+        y: root.height * 0.70;
+        width: root.width * 0.7;
+        height: root.height * 0.11;
+        clicked => { root.status = "sink"; }
+    }
+
+    Text {
+        x: 0;
+        y: root.height * 0.86;
+        width: root.width;
+        text: "last: " + root.status;
+        font-size: root.width * 0.045;
+        color: black;
+        horizontal-alignment: center;
+    }
+}
