@@ -29,6 +29,7 @@ use slint::platform::software_renderer::MinimalSoftwareWindow;
 use std::cell::RefCell;
 use std::marker::PhantomData;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -65,6 +66,7 @@ pub struct KindleBackend<State = NoSchedule> {
     window: Rc<MinimalSoftwareWindow>,
     wake_schedule: Arc<Mutex<Option<WakeSchedule>>>,
     on_wake: OnWakeCallback,
+    bilevel: Arc<AtomicBool>,
     _state: PhantomData<State>,
 }
 
@@ -81,12 +83,29 @@ impl<State> KindleBackend<State> {
             .map_err(|e| slint::PlatformError::Other(format!("{e}")))
     }
 
+    /// Render in **bilevel mode**: force every pixel to pure black or white,
+    /// with no grey levels at all.
+    ///
+    /// E-ink can only show a true grey by running a waveform that briefly drives
+    /// the pixels through black — an unavoidable flash. Pure black/white content
+    /// updates with the panel's fast 2-level waveform instead, which flips
+    /// particles in place with no flash. So bilevel mode trades anti-aliasing
+    /// (text and edges get noticeably harder) for completely flash-free updates.
+    ///
+    /// Off by default. A change takes effect on the next render, so set it
+    /// before your first window draw — toggling it later only affects pixels
+    /// redrawn after that.
+    pub fn set_bilevel(&self, enabled: bool) {
+        self.bilevel.store(enabled, Ordering::Relaxed);
+    }
+
     /// Switch state, keeping the same internals.
     fn into_state<Next>(self) -> KindleBackend<Next> {
         KindleBackend {
             window: self.window,
             wake_schedule: self.wake_schedule,
             on_wake: self.on_wake,
+            bilevel: self.bilevel,
             _state: PhantomData,
         }
     }
@@ -164,7 +183,8 @@ pub fn install(font_data: &[u8]) -> Result<KindleBackend, slint::PlatformError> 
 
     let wake_schedule = Arc::new(Mutex::new(None));
     let on_wake: OnWakeCallback = Rc::new(RefCell::new(None));
-    let platform = KindlePlatform::new(wake_schedule.clone(), on_wake.clone())
+    let bilevel = Arc::new(AtomicBool::new(false));
+    let platform = KindlePlatform::new(wake_schedule.clone(), on_wake.clone(), bilevel.clone())
         .map_err(|e| slint::PlatformError::Other(format!("failed to init Kindle platform: {e}")))?;
     let window = platform.window.clone();
     slint::platform::set_platform(Box::new(platform))
@@ -173,6 +193,7 @@ pub fn install(font_data: &[u8]) -> Result<KindleBackend, slint::PlatformError> 
         window,
         wake_schedule,
         on_wake,
+        bilevel,
         _state: PhantomData,
     })
 }
