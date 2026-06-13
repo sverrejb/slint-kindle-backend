@@ -10,7 +10,7 @@ use slint::platform::software_renderer::{MinimalSoftwareWindow, RepaintBufferTyp
 use slint::platform::{EventLoopProxy, Platform, PlatformError, WindowAdapter};
 
 use crate::framebuffer::Framebuffer;
-use crate::power;
+use crate::power::{arm_wakealarm, find_wakealarm, suspend_to_mem};
 use crate::touch::TouchInput;
 use crate::wakeup::{self, KindleEventLoopProxy, Queue, Wakeup};
 use crate::{OnWakeCallback, WakeSchedule};
@@ -18,7 +18,6 @@ use crate::{OnWakeCallback, WakeSchedule};
 // Animations get redrawn at most ~30 fps. E-ink can't keep up with anything
 // faster, so quicker wakes would just waste battery.
 const ANIMATION_FRAME: Duration = Duration::from_millis(33);
-
 
 pub(crate) struct KindlePlatform {
     pub(crate) window: Rc<MinimalSoftwareWindow>,
@@ -81,8 +80,16 @@ impl KindlePlatform {
 
         frame_buffer.wait_for_update_complete();
 
-        let _ = power::arm_wakealarm(wakealarm_path, schedule.wake_interval);
-        let _ = power::suspend_to_mem();
+        // If arming fails we still suspend, sleeping to save battery is better than
+        // staying awake.
+        if let Err(e) = arm_wakealarm(wakealarm_path, schedule.wake_interval) {
+            log::error!(
+                "failed to arm RTC wakealarm: {e}; device may only wake on user input this cycle"
+            );
+        }
+        if let Err(e) = suspend_to_mem() {
+            log::error!("suspend-to-RAM failed: {e}");
+        }
 
         // Start a fresh stay_awake window so the consumer's app
         // gets at least that long to react.
@@ -118,8 +125,10 @@ impl Platform for KindlePlatform {
         let mut frame_buffer = Framebuffer::open()
             .map_err(|e| PlatformError::Other(format!("failed to open /dev/fb0: {e}")))?;
 
-        self.window
-            .set_size(slint::PhysicalSize::new(frame_buffer.width, frame_buffer.height));
+        self.window.set_size(slint::PhysicalSize::new(
+            frame_buffer.width,
+            frame_buffer.height,
+        ));
 
         let mut touch_input = TouchInput::open(frame_buffer.width, frame_buffer.height)
             .map_err(|e| PlatformError::Other(format!("failed to open touch input: {e}")))?;
@@ -127,7 +136,6 @@ impl Platform for KindlePlatform {
         frame_buffer.fill(0xff);
         frame_buffer.refresh_full();
 
-        
         let width = frame_buffer.width as usize;
         let mut rgb_buffer = vec![Rgb8Pixel::default(); width * frame_buffer.height as usize];
         let mut gray_buffer = vec![0u8; width];
@@ -137,7 +145,7 @@ impl Platform for KindlePlatform {
         // Wakealarm path is probed once. If the device doesn't expose one
         // (e.g. running on a dev host), the suspend cycle stays disabled even
         // if a schedule is configured.
-        let wakealarm = power::find_wakealarm().ok();
+        let wakealarm = find_wakealarm().ok();
         let mut last_interaction = Instant::now();
 
         loop {
@@ -176,8 +184,13 @@ impl Platform for KindlePlatform {
             // Block until an fd has activity or the timeout expires.
             // Retry on EINTR, bail on any other error.
             // SAFETY: fds is a valid 2-element array while poll runs.
-            let poll_result =
-                unsafe { libc::poll(file_descriptors.as_mut_ptr(), file_descriptors.len() as libc::nfds_t, timeout_ms) };
+            let poll_result = unsafe {
+                libc::poll(
+                    file_descriptors.as_mut_ptr(),
+                    file_descriptors.len() as libc::nfds_t,
+                    timeout_ms,
+                )
+            };
             if poll_result < 0 {
                 let err = std::io::Error::last_os_error();
                 if err.raw_os_error() == Some(libc::EINTR) {
@@ -226,8 +239,7 @@ impl Platform for KindlePlatform {
 
             let black_and_white = self.black_and_white.load(Ordering::Relaxed);
             self.window.draw_if_needed(|renderer| {
-                let dirty = renderer.render(&mut rgb_buffer
-        , width);
+                let dirty = renderer.render(&mut rgb_buffer, width);
                 let origin = dirty.bounding_box_origin();
                 let size = dirty.bounding_box_size();
                 let (x0, y0) = (origin.x as usize, origin.y as usize);
@@ -238,10 +250,10 @@ impl Platform for KindlePlatform {
                 let gray = &mut gray_buffer[..w];
                 for row in 0..h {
                     let start = (y0 + row) * width + x0;
-                    let rgb = &rgb_buffer
-        [start..start + w];
+                    let rgb = &rgb_buffer[start..start + w];
                     for (g, p) in gray.iter_mut().zip(rgb.iter()) {
-                        let value = ((77 * p.r as u32 + 150 * p.g as u32 + 29 * p.b as u32) >> 8) as u8;
+                        let value =
+                            ((77 * p.r as u32 + 150 * p.g as u32 + 29 * p.b as u32) >> 8) as u8;
                         // Black-and-white mode forces pure black/white based on threshold
                         *g = if black_and_white {
                             if value < 128 { 0x00 } else { 0xff }

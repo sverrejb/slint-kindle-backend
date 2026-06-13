@@ -116,10 +116,6 @@ fn poke(fd: &OwnedFd) {
     let byte: u8 = 1;
     // SAFETY: writing one byte to a pipe is always valid, and fd is valid for the borrow.
     unsafe {
-        libc::write(
-            fd.as_raw_fd(),
-            &byte as *const u8 as *const libc::c_void,
-            1,
-        );
+        libc::write(fd.as_raw_fd(), &byte as *const u8 as *const libc::c_void, 1);
     }
 }

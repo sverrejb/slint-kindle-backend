@@ -94,9 +94,22 @@ impl TouchInput {
             return Err(err);
         }
 
-        // Query the axis ranges from the device so we scale correctly.
-        let max_x = Self::query_axis_max(fd, TOUCH_POSITION_X as u8).unwrap_or(4095) as f32;
-        let max_y = Self::query_axis_max(fd, TOUCH_POSITION_Y as u8).unwrap_or(4095) as f32;
+        // Query the axis ranges from the device so we scale correctly. On
+        // failure we fall back to a common 12-bit max, but log it: a wrong range
+        // silently maps touches to the wrong coordinates, which is otherwise
+        // baffling to diagnose.
+        let max_x = Self::query_axis_max(fd, TOUCH_POSITION_X as u8).unwrap_or_else(|| {
+            log::warn!(
+                "could not read touch X axis range; assuming max 4095, touch may be miscalibrated"
+            );
+            4095
+        }) as f32;
+        let max_y = Self::query_axis_max(fd, TOUCH_POSITION_Y as u8).unwrap_or_else(|| {
+            log::warn!(
+                "could not read touch Y axis range; assuming max 4095, touch may be miscalibrated"
+            );
+            4095
+        }) as f32;
 
         Ok(Self {
             file_descriptor: fd,
@@ -115,14 +128,15 @@ impl TouchInput {
     /// Query the maximum value for an absolute axis via EVIOCGABS.
     fn query_axis_max(fd: libc::c_int, axis: u8) -> Option<i32> {
         let mut info = InputAbsinfo::default();
-        let ret = unsafe {
-            libc::ioctl(
-                fd,
-                eviocgabs(axis) as _,
-                &mut info as *mut InputAbsinfo,
-            )
-        };
-        if ret < 0 { None } else { Some(info.maximum) }
+        let ret = unsafe { libc::ioctl(fd, eviocgabs(axis) as _, &mut info as *mut InputAbsinfo) };
+        // A non-positive maximum would make the scale factor divide by zero
+        // (producing inf/NaN coordinates), so treat it as "unknown" and let the
+        // caller fall back to a sane default.
+        if ret < 0 || info.maximum <= 0 {
+            None
+        } else {
+            Some(info.maximum)
+        }
     }
 
     /// Scan /dev/input/event* for a device that reports ABS_MT_POSITION_X (0x35).

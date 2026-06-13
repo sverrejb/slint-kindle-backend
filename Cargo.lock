@@ -4252,6 +4252,7 @@ dependencies = [
  "fontdb",
  "fontique",
  "libc",
+ "log",
  "slint",
 ]
 

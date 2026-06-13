@@ -76,7 +76,10 @@ impl<State> KindleBackend<State> {
     /// Call this **after** you've created your window (e.g. `AppWindow::new()`).
     /// Fonts can't be added before then because Slint hasn't set up its font
     /// system yet.
-    pub fn register_font_from_memory(&self, data: &'static [u8]) -> Result<(), slint::PlatformError> {
+    pub fn register_font_from_memory(
+        &self,
+        data: &'static [u8],
+    ) -> Result<(), slint::PlatformError> {
         self.window
             .renderer()
             .register_font_from_memory(data)
@@ -174,13 +177,19 @@ pub fn install(font_data: &[u8]) -> Result<KindleBackend, slint::PlatformError> 
         .map_err(|e| slint::PlatformError::Other(format!("failed to stage default font: {e}")))?;
 
     // SAFETY: install() runs once at startup before any threads exist, so nothing else can read this env var at the same time.
-    unsafe { std::env::set_var("SLINT_DEFAULT_FONT", &path); }
+    unsafe {
+        std::env::set_var("SLINT_DEFAULT_FONT", &path);
+    }
 
     let wake_schedule = Arc::new(Mutex::new(None));
     let on_wake: OnWakeCallback = Rc::new(RefCell::new(None));
     let black_and_white = Arc::new(AtomicBool::new(false));
-    let platform = KindlePlatform::new(wake_schedule.clone(), on_wake.clone(), black_and_white.clone())
-        .map_err(|e| slint::PlatformError::Other(format!("failed to init Kindle platform: {e}")))?;
+    let platform = KindlePlatform::new(
+        wake_schedule.clone(),
+        on_wake.clone(),
+        black_and_white.clone(),
+    )
+    .map_err(|e| slint::PlatformError::Other(format!("failed to init Kindle platform: {e}")))?;
     let window = platform.window.clone();
     slint::platform::set_platform(Box::new(platform))
         .map_err(|e| slint::PlatformError::Other(format!("{e}")))?;
