@@ -1,0 +1,20 @@
+[package]
+name = "slint-kindle-dithering"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[build-dependencies]
+slint-build = "1.16"
+
+# On the Kindle, render to the E-ink framebuffer through this crate's backend.
+# Matches the device triple (armv7-unknown-linux-musleabihf); see the
+# cross-platform example for why the cfg is shaped this way.
+[target.'cfg(all(target_arch = "arm", target_os = "linux", target_env = "musl"))'.dependencies]
+slint = { version = "1.16", default-features = false, features = ["compat-1-2", "std", "renderer-software"] }
+slint-backend-kindle = { path = "../.." }
+
+# Everywhere else (your Mac/PC): Slint's stock desktop backend, so the same
+# binary previews in a window without flashing a device.
+[target.'cfg(not(all(target_arch = "arm", target_os = "linux", target_env = "musl")))'.dependencies]
+slint = "1.16"

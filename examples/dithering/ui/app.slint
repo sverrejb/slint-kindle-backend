@@ -1,0 +1,127 @@
+// Comparison sheet: one row per dithering technique, each split into shade
+// bands (light -> dark). The bands are pre-rendered pixel images from Rust;
+// this file just lays them out in a grid with aligned headers.
+//
+// Sizes come from the Rust side (label-w / band-w / row-h) so the Image
+// elements are exactly the pixel size of their source images — a 1:1 blit. We
+// also set image-rendering: pixelated as a safety net so that on a HiDPI desktop
+// preview the dither is scaled by whole pixels rather than blurred.
+
+struct DitherRow {
+    name: string,
+    strip: image,
+}
+
+export component AppWindow inherits Window {
+    background: white;
+    preferred-width: 1080px;
+    preferred-height: 1448px;
+
+    in property <[DitherRow]> rows;
+    in property <[string]> shade-labels;
+    in property <length> label-w: 180px;
+    in property <length> band-w: 70px;
+    in property <length> row-h: 78px;
+    callback quit();
+
+    // Vertical pitch of one row (swatch height + a little breathing room).
+    property <length> row-stride: root.row-h + 6px;
+
+    VerticalLayout {
+        padding: 8px;
+        spacing: 4px;
+
+        // Title bar. The quit button floats in the top-right corner (declared
+        // after this layout) the same way the other examples place it.
+        HorizontalLayout {
+            height: 38px;
+            Text {
+                text: "Dithering on E-ink — light to dark";
+                font-size: 22px;
+                color: black;
+                vertical-alignment: center;
+            }
+        }
+
+        Text {
+            height: 20px;
+            text: "Pure black/white pixels refresh without flashing. The 'True grey' row uses real grey and flashes.";
+            font-size: 13px;
+            color: black;
+        }
+
+        // Column headers: a spacer the width of the name column, then one
+        // centered label per band so the percentages line up over the swatches.
+        HorizontalLayout {
+            height: 20px;
+            Rectangle { width: root.label-w; }
+            for label in root.shade-labels: Text {
+                width: root.band-w;
+                text: label;
+                font-size: 13px;
+                color: black;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+            Rectangle { }
+        }
+
+        // The rows themselves. Absolute placement inside a Flickable keeps each
+        // swatch at its exact pixel height (a layout might stretch/shrink it)
+        // and lets the sheet scroll if it ever overflows a smaller screen.
+        Flickable {
+            vertical-stretch: 1;
+            viewport-width: self.width;
+            viewport-height: root.rows.length * root.row-stride;
+
+            for row[i] in root.rows: HorizontalLayout {
+                x: 0;
+                y: i * root.row-stride;
+                width: parent.width;
+                height: root.row-h;
+
+                Text {
+                    width: root.label-w;
+                    text: row.name;
+                    font-size: 16px;
+                    color: black;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+                Image {
+                    width: root.band-w * root.shade-labels.length;
+                    height: root.row-h;
+                    source: row.strip;
+                    image-fit: fill;
+                    image-rendering: pixelated;
+                }
+                Rectangle { }
+            }
+        }
+    }
+
+    // Quit button — top-right corner "×", as in the other examples. Kept small
+    // and clear of the header row so it never covers a swatch on this dense sheet.
+    Rectangle {
+        x: root.width - self.width - 12px;
+        y: 6px;
+        width: 60px;
+        height: 60px;
+        border-width: 2px;
+        border-color: black;
+        border-radius: 6px;
+        background: quit-touch.pressed ? #cccccc : white;
+
+        quit-touch := TouchArea {
+            clicked => { root.quit(); }
+        }
+
+        Text {
+            text: "×";
+            font-size: 40px;
+            color: black;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+}
