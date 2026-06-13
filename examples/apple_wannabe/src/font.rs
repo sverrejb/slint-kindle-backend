@@ -62,7 +62,11 @@ fn parse(jhf: &str) -> Vec<Glyph> {
 }
 
 
-pub fn build_points(jhf: &str, word: &str) -> (Vec<(f32, f32, bool)>, (f32, f32, f32, f32)) {
+
+type PenPoint = (f32, f32, bool);
+type ViewBox = (f32, f32, f32, f32);
+
+pub fn build_points(jhf: &str, word: &str) -> (Vec<PenPoint>, ViewBox) {
     let glyphs = parse(jhf);
     let mut pts = Vec::new();
     let mut cursor = 0.0f32;
