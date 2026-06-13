@@ -4247,7 +4247,7 @@ dependencies = [
 
 [[package]]
 name = "slint-backend-kindle"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "fontdb",
  "fontique",
@@ -4266,6 +4266,15 @@ dependencies = [
  "i-slint-compiler",
  "spin_on",
  "toml_edit",
+]
+
+[[package]]
+name = "slint-kindle-apple_wannabe"
+version = "0.1.0"
+dependencies = [
+ "slint",
+ "slint-backend-kindle",
+ "slint-build",
 ]
 
 [[package]]

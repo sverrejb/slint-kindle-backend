@@ -1,0 +1,17 @@
+[package]
+name = "slint-kindle-apple_wannabe"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[build-dependencies]
+slint-build = "1.16"
+
+
+[target.'cfg(all(target_arch = "arm", target_os = "linux", target_env = "musl"))'.dependencies]
+slint = { version = "1.16", default-features = false, features = ["compat-1-2", "std", "renderer-software"] }
+slint-backend-kindle = { path = "../.." }
+
+
+[target.'cfg(not(all(target_arch = "arm", target_os = "linux", target_env = "musl")))'.dependencies]
+slint = "1.16"

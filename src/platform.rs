@@ -1,4 +1,3 @@
-use std::ops::Range;
 use std::os::fd::AsRawFd;
 use std::path::Path;
 use std::rc::Rc;
@@ -7,9 +6,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use slint::Rgb8Pixel;
-use slint::platform::software_renderer::{
-    LineBufferProvider, MinimalSoftwareWindow, RepaintBufferType,
-};
+use slint::platform::software_renderer::{MinimalSoftwareWindow, RepaintBufferType};
 use slint::platform::{EventLoopProxy, Platform, PlatformError, WindowAdapter};
 
 use crate::framebuffer::Framebuffer;
@@ -22,41 +19,6 @@ use crate::{OnWakeCallback, WakeSchedule};
 // faster, so quicker wakes would just waste battery.
 const ANIMATION_FRAME: Duration = Duration::from_millis(33);
 
-struct KindleLineBuffer<'a> {
-    fb: &'a mut Framebuffer,
-    rgb_scratch: &'a mut [Rgb8Pixel],
-    gray_scratch: &'a mut [u8],
-    black_and_white: bool,
-}
-
-impl LineBufferProvider for KindleLineBuffer<'_> {
-    type TargetPixel = Rgb8Pixel;
-
-    fn process_line(
-        &mut self,
-        line: usize,
-        range: Range<usize>,
-        render_fn: impl FnOnce(&mut [Self::TargetPixel]),
-    ) {
-        let rgb = &mut self.rgb_scratch[range.clone()];
-        render_fn(rgb);
-
-        // The E-ink screen only shows grayscale, so turn each RGB pixel into a single gray value.
-        // BT.601 luma weights (0.299, 0.587, 0.114) scaled by 256 and bitshifted to devide by 256.
-        let gray = &mut self.gray_scratch[range.clone()];
-        for (g, p) in gray.iter_mut().zip(rgb.iter()) {
-            let value = ((77 * p.r as u32 + 150 * p.g as u32 + 29 * p.b as u32) >> 8) as u8;
-            // Black-and-white mode forces pure black/white based on threshold
-            *g = if self.black_and_white {
-                if value < 128 { 0x00 } else { 0xff }
-            } else {
-                value
-            };
-        }
-
-        self.fb.write_line(line, range, gray);
-    }
-}
 
 pub(crate) struct KindlePlatform {
     pub(crate) window: Rc<MinimalSoftwareWindow>,
@@ -165,8 +127,10 @@ impl Platform for KindlePlatform {
         frame_buffer.fill(0xff);
         frame_buffer.refresh_full();
 
-        let mut rgb_scratch = vec![Rgb8Pixel::default(); frame_buffer.width as usize];
-        let mut gray_scratch = vec![0u8; frame_buffer.width as usize];
+        
+        let width = frame_buffer.width as usize;
+        let mut rgb_buffer = vec![Rgb8Pixel::default(); width * frame_buffer.height as usize];
+        let mut gray_buffer = vec![0u8; width];
 
         let wakeup_read_fd = self.wakeup.read.as_raw_fd();
 
@@ -262,13 +226,32 @@ impl Platform for KindlePlatform {
 
             let black_and_white = self.black_and_white.load(Ordering::Relaxed);
             self.window.draw_if_needed(|renderer| {
-                let dirty = renderer.render_by_line(KindleLineBuffer {
-                    fb: &mut frame_buffer,
-                    rgb_scratch: &mut rgb_scratch,
-                    gray_scratch: &mut gray_scratch,
-                    black_and_white,
-                });
-                frame_buffer.refresh_region(dirty.bounding_box_origin(), dirty.bounding_box_size());
+                let dirty = renderer.render(&mut rgb_buffer
+        , width);
+                let origin = dirty.bounding_box_origin();
+                let size = dirty.bounding_box_size();
+                let (x0, y0) = (origin.x as usize, origin.y as usize);
+                let (w, h) = (size.width as usize, size.height as usize);
+
+                // The E-ink screen only shows grayscale, so turn each RGB pixel into a single gray value.
+                // BT.601 luma weights (0.299, 0.587, 0.114) scaled by 256 and bitshifted to devide by 256.
+                let gray = &mut gray_buffer[..w];
+                for row in 0..h {
+                    let start = (y0 + row) * width + x0;
+                    let rgb = &rgb_buffer
+        [start..start + w];
+                    for (g, p) in gray.iter_mut().zip(rgb.iter()) {
+                        let value = ((77 * p.r as u32 + 150 * p.g as u32 + 29 * p.b as u32) >> 8) as u8;
+                        // Black-and-white mode forces pure black/white based on threshold
+                        *g = if black_and_white {
+                            if value < 128 { 0x00 } else { 0xff }
+                        } else {
+                            value
+                        };
+                    }
+                    frame_buffer.write_line(y0 + row, x0..x0 + w, gray);
+                }
+                frame_buffer.refresh_region(origin, size);
             });
         }
 

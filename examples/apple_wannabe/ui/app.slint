@@ -1,0 +1,66 @@
+// Ghost-writer demo — a word traced on progressively, pen-on-paper style.
+// The geometry lives in Rust (baked from an SVG outline); each frame Rust sets
+// `commands` to a growing prefix of the path so the line draws itself in.
+//
+// Sizes are proportional to the window so it works on any Kindle (600×800
+// Touch, 1072×1448 Paperwhite, etc.). The backend sets the window size from
+// the framebuffer geometry.
+export component AppWindow inherits Window {
+    background: white;
+
+    // SVG path commands for the revealed-so-far prefix (rebuilt every frame).
+    in property <string> commands;
+    // The source SVG's viewBox, so path coordinates map correctly.
+    in property <float> vb-x;
+    in property <float> vb-y;
+    in property <float> vb-w;
+    in property <float> vb-h;
+
+    callback quit();
+
+    // The writing. `fit: contain` (the Path default) preserves aspect ratio,
+    // but we size the element to the viewBox ratio anyway so it fills exactly.
+    Path {
+        x: root.width * 0.05;
+        width: root.width * 0.9;
+        // Match the word's aspect ratio so there's no letterboxing.
+        height: self.width * (root.vb-h / root.vb-w);
+        y: (root.height - self.height) / 2;
+
+        viewbox-x: root.vb-x;
+        viewbox-y: root.vb-y;
+        viewbox-width: root.vb-w;
+        viewbox-height: root.vb-h;
+
+        commands: root.commands;
+        stroke: black;
+        stroke-width: root.width * 0.008;
+        // Round cap/join read as a pen rather than a cut ribbon.
+        stroke-line-cap: round;
+        stroke-line-join: round;
+    }
+
+    // Quit button — top-right corner, 10% of width square.
+    Rectangle {
+        x: parent.width - self.width - root.width * 0.03;
+        y: root.height * 0.02;
+        width: root.width * 0.1;
+        height: root.width * 0.1;
+        border-width: root.width * 0.005;
+        border-color: black;
+        border-radius: root.width * 0.015;
+        background: quit-touch.pressed ? #cccccc : white;
+
+        quit-touch := TouchArea {
+            clicked => { root.quit(); }
+        }
+
+        Text {
+            text: "×";
+            font-size: root.width * 0.06;
+            color: black;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+}
