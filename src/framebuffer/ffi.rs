@@ -74,7 +74,7 @@ pub(super) struct FbFixScreeninfo {
 }
 
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 pub(crate) struct UpdateRect {
     pub top: u32,
     pub left: u32,
@@ -83,7 +83,7 @@ pub(crate) struct UpdateRect {
 }
 
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 pub(super) struct AlternateBuffer {
     pub(super) physical_address: u32,
     pub(super) width: u32,
@@ -92,7 +92,7 @@ pub(super) struct AlternateBuffer {
 }
 
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 pub(super) struct UpdateRequest {
     pub(super) update_region: UpdateRect,
     pub(super) waveform_mode: u32,
@@ -106,6 +106,7 @@ pub(super) struct UpdateRequest {
 }
 
 #[repr(C)]
+#[derive(Default)]
 pub(super) struct UpdateRequestRex {
     pub(super) update_region: UpdateRect,
     pub(super) waveform_mode: u32,
@@ -120,12 +121,46 @@ pub(super) struct UpdateRequestRex {
     pub(super) hist_gray_waveform_mode: u32,
 }
 
+#[repr(C)]
+#[derive(Default)]
+pub(super) struct SwipeData {
+    pub(super) direction: u32,
+    pub(super) steps: u32,
+}
+
+// MediaTek-based Kindles
+#[repr(C)]
+#[derive(Default)]
+pub(super) struct UpdateRequestMtk {
+    pub(super) update_region: UpdateRect,
+    pub(super) waveform_mode: u32,
+    pub(super) update_mode: u32,
+    pub(super) update_marker: u32,
+    pub(super) temperature: i32,
+    pub(super) flags: u32,
+    pub(super) dither_mode: i32,
+    pub(super) quant_bit: i32,
+    pub(super) alternate_buffer: AlternateBuffer,
+    pub(super) swipe_data: SwipeData,
+    pub(super) hist_bw_waveform_mode: u32,
+    pub(super) hist_gray_waveform_mode: u32,
+    pub(super) ts_pxp: u32,
+    pub(super) ts_epdc: u32,
+}
+
 // Kindle EPDC ioctl and constants.
 // The ioctl number was confirmed by stracing `eips` on a real device.
 pub(super) const MXCFB_SEND_UPDATE: libc::c_ulong = 0x4048_462e;
 
 // ioctl number for Kindle Paperwhite 10th gen, from strace.
 pub(super) const MXCFB_SEND_UPDATE_REX: libc::c_ulong = 0x4050_462e;
+
+// _IOW('F', 0x2E, struct mxcfb_update_data_mtk) 96-byte struct on MTK devices.
+pub(super) const MXCFB_SEND_UPDATE_MTK: libc::c_ulong = 0x4060_462e;
+
+const _: () = assert!(std::mem::size_of::<UpdateRequest>() == 72);
+const _: () = assert!(std::mem::size_of::<UpdateRequestRex>() == 80);
+const _: () = assert!(std::mem::size_of::<UpdateRequestMtk>() == 96);
 
 // Blocks until the EPDC has finished applying the update with a given marker.
 pub(super) const MXCFB_WAIT_FOR_UPDATE_COMPLETE: libc::c_ulong = 0xc008_462f;

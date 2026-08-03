@@ -5,24 +5,32 @@ use std::ops::Range;
 use std::os::fd::AsRawFd;
 
 use ffi::{
-    AlternateBuffer, FBIOGET_FSCREENINFO, FBIOGET_VSCREENINFO, FbFixScreeninfo, FbVarScreeninfo,
-    MXCFB_SEND_UPDATE, MXCFB_SEND_UPDATE_REX, MXCFB_WAIT_FOR_UPDATE_COMPLETE, TEMP_USE_AMBIENT,
+    FBIOGET_FSCREENINFO, FBIOGET_VSCREENINFO, FbFixScreeninfo, FbVarScreeninfo, MXCFB_SEND_UPDATE,
+    MXCFB_SEND_UPDATE_MTK, MXCFB_SEND_UPDATE_REX, MXCFB_WAIT_FOR_UPDATE_COMPLETE, TEMP_USE_AMBIENT,
     UPDATE_MODE_FULL, UPDATE_MODE_PARTIAL, UpdateMarkerData, UpdateRect, UpdateRequest,
-    UpdateRequestRex, WAVEFORM_MODE_AUTO, WAVEFORM_MODE_GC16,
+    UpdateRequestMtk, UpdateRequestRex, WAVEFORM_MODE_AUTO, WAVEFORM_MODE_GC16,
 };
 
-/// Which MXCFB update ioctl this kernel accepts.
+/// Which MXCFB update ioctl this kernel accepts, varies with the Kindle model
 ///
-/// The two generations can't be told apart a priori — the framebuffer's driver
-/// id string is `mxc_epdc_fb` on both, and the difference is the update struct's
-/// size (72 vs 80 bytes), which nothing advertises. So we probe on first refresh
-/// and remember the winner instead of retrying the failing ioctl every frame.
+//We probe on first refresh and remember the winner instead of retrying the failing ioctl every frame.
 #[derive(Clone, Copy)]
 enum UpdateVariant {
     /// `MXCFB_SEND_UPDATE` — 72-byte struct, older devices.
     Legacy,
     /// `MXCFB_SEND_UPDATE_REX` — 80-byte struct, Paperwhite 10th gen and newer.
     Rex,
+    /// `MXCFB_SEND_UPDATE_MTK` — 96-byte struct, MediaTek devices (Basic 2022,
+    /// Paperwhite 5, Scribe).
+    Mtk,
+    /// No variant was accepted. Cached so a hopeless kernel costs one probe
+    /// and one error log total, not three failing ioctls per frame.
+    Unsupported,
+}
+
+impl UpdateVariant {
+    /// Probed oldest ABI first.
+    const PROBE_ORDER: [UpdateVariant; 3] = [Self::Legacy, Self::Rex, Self::Mtk];
 }
 
 /// Memory-mapped handle to the Kindle's e-ink framebuffer.
@@ -161,25 +169,46 @@ impl Framebuffer {
     /// known-failing one every refresh.
     fn send_update(&self, region: UpdateRect, waveform: u32, mode: u32) {
         match self.update_variant.get() {
-            Some(UpdateVariant::Legacy) => {
-                self.send_update_legacy(region, waveform, mode);
-            }
-            Some(UpdateVariant::Rex) => {
-                self.send_update_rex(region, waveform, mode);
+            Some(variant) => {
+                self.send_update_variant(variant, region, waveform, mode);
             }
             None => {
-                if self.send_update_legacy(region, waveform, mode) {
-                    self.update_variant.set(Some(UpdateVariant::Legacy));
-                } else if self.send_update_rex(region, waveform, mode) {
-                    self.update_variant.set(Some(UpdateVariant::Rex));
-                } else {
+                let accepted = UpdateVariant::PROBE_ORDER
+                    .into_iter()
+                    .find(|&variant| self.send_update_variant(variant, region, waveform, mode));
+                if accepted.is_none() {
                     log::error!(
-                        "EPDC refresh failed: neither MXCFB_SEND_UPDATE nor \
-                         MXCFB_SEND_UPDATE_REX was accepted; the screen will not update"
+                        "EPDC refresh failed: no known MXCFB_SEND_UPDATE variant \
+                         was accepted; the screen will not update"
                     );
                 }
+                self.update_variant
+                    .set(Some(accepted.unwrap_or(UpdateVariant::Unsupported)));
             }
         }
+    }
+
+    /// Issue one specific update ioctl variant. Returns whether it succeeded.
+    fn send_update_variant(
+        &self,
+        variant: UpdateVariant,
+        region: UpdateRect,
+        waveform: u32,
+        mode: u32,
+    ) -> bool {
+        match variant {
+            UpdateVariant::Legacy => self.send_update_legacy(region, waveform, mode),
+            UpdateVariant::Rex => self.send_update_rex(region, waveform, mode),
+            UpdateVariant::Mtk => self.send_update_mtk(region, waveform, mode),
+            UpdateVariant::Unsupported => false,
+        }
+    }
+
+    /// Hand one of the `UpdateRequest*` structs to the kernel. Returns whether
+    /// the ioctl succeeded.
+    fn send_update_ioctl<T>(&self, request: libc::c_ulong, update: &T) -> bool {
+        // SAFETY: `update` outlives the ioctl and matches the kernel's struct.
+        unsafe { libc::ioctl(self.file.as_raw_fd(), request as _, update as *const _) != -1 }
     }
 
     /// Issue the legacy `MXCFB_SEND_UPDATE` (72-byte struct). Returns whether the
@@ -190,30 +219,10 @@ impl Framebuffer {
             waveform_mode: waveform,
             update_mode: mode,
             update_marker: 1,
-            previous_bw_waveform_mode: 0,
-            previous_gray_waveform_mode: 0,
             temperature: TEMP_USE_AMBIENT,
-            flags: 0,
-            alternate_buffer: AlternateBuffer {
-                physical_address: 0,
-                width: 0,
-                height: 0,
-                update_region: UpdateRect {
-                    top: 0,
-                    left: 0,
-                    width: 0,
-                    height: 0,
-                },
-            },
+            ..Default::default()
         };
-        // SAFETY: `update` outlives the ioctl and matches the kernel's struct.
-        unsafe {
-            libc::ioctl(
-                self.file.as_raw_fd(),
-                MXCFB_SEND_UPDATE as _,
-                &update as *const _,
-            ) != -1
-        }
+        self.send_update_ioctl(MXCFB_SEND_UPDATE, &update)
     }
 
     /// Issue the modern `MXCFB_SEND_UPDATE_REX` (80-byte struct). Returns whether
@@ -225,31 +234,23 @@ impl Framebuffer {
             update_mode: mode,
             update_marker: 1,
             temperature: TEMP_USE_AMBIENT,
-            flags: 0,
-            dither_mode: 0,
-            quant_bit: 0,
-            alternate_buffer: AlternateBuffer {
-                physical_address: 0,
-                width: 0,
-                height: 0,
-                update_region: UpdateRect {
-                    top: 0,
-                    left: 0,
-                    width: 0,
-                    height: 0,
-                },
-            },
-            hist_bw_waveform_mode: 0,
-            hist_gray_waveform_mode: 0,
+            ..Default::default()
         };
-        // SAFETY: `update` outlives the ioctl and matches the kernel's struct.
-        unsafe {
-            libc::ioctl(
-                self.file.as_raw_fd(),
-                MXCFB_SEND_UPDATE_REX as _,
-                &update as *const _,
-            ) != -1
-        }
+        self.send_update_ioctl(MXCFB_SEND_UPDATE_REX, &update)
+    }
+
+    /// Issue `MXCFB_SEND_UPDATE_MTK` (96-byte struct, MediaTek devices).
+    /// Returns whether the ioctl succeeded.
+    fn send_update_mtk(&self, region: UpdateRect, waveform: u32, mode: u32) -> bool {
+        let update = UpdateRequestMtk {
+            update_region: region,
+            waveform_mode: waveform,
+            update_mode: mode,
+            update_marker: 1,
+            temperature: TEMP_USE_AMBIENT,
+            ..Default::default()
+        };
+        self.send_update_ioctl(MXCFB_SEND_UPDATE_MTK, &update)
     }
 
     /// Full-screen GC16 refresh
