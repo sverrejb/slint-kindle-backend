@@ -6,9 +6,10 @@ use std::os::fd::AsRawFd;
 
 use ffi::{
     FBIOGET_FSCREENINFO, FBIOGET_VSCREENINFO, FbFixScreeninfo, FbVarScreeninfo, MXCFB_SEND_UPDATE,
-    MXCFB_SEND_UPDATE_MTK, MXCFB_SEND_UPDATE_REX, MXCFB_WAIT_FOR_UPDATE_COMPLETE, TEMP_USE_AMBIENT,
-    UPDATE_MODE_FULL, UPDATE_MODE_PARTIAL, UpdateMarkerData, UpdateRect, UpdateRequest,
-    UpdateRequestMtk, UpdateRequestRex, WAVEFORM_MODE_AUTO, WAVEFORM_MODE_GC16,
+    MXCFB_SEND_UPDATE_MTK, MXCFB_SEND_UPDATE_REX, MXCFB_SEND_UPDATE_ZELDA,
+    MXCFB_WAIT_FOR_UPDATE_COMPLETE, TEMP_USE_AMBIENT, UPDATE_MODE_FULL, UPDATE_MODE_PARTIAL,
+    UpdateMarkerData, UpdateRect, UpdateRequest, UpdateRequestMtk, UpdateRequestRex,
+    UpdateRequestZelda, WAVEFORM_MODE_AUTO, WAVEFORM_MODE_GC16,
 };
 
 /// Which MXCFB update ioctl this kernel accepts, varies with the Kindle model
@@ -20,6 +21,8 @@ enum UpdateVariant {
     Legacy,
     /// `MXCFB_SEND_UPDATE_REX` — 80-byte struct, Paperwhite 10th gen and newer.
     Rex,
+    /// `MXCFB_SEND_UPDATE_ZELDA` — 88-byte struct, KOA2/KOA3 (Oasis 2/3).
+    Zelda,
     /// `MXCFB_SEND_UPDATE_MTK` — 96-byte struct, MediaTek devices (Basic 2022,
     /// Paperwhite 5, Scribe).
     Mtk,
@@ -30,7 +33,7 @@ enum UpdateVariant {
 
 impl UpdateVariant {
     /// Probed oldest ABI first.
-    const PROBE_ORDER: [UpdateVariant; 3] = [Self::Legacy, Self::Rex, Self::Mtk];
+    const PROBE_ORDER: [UpdateVariant; 4] = [Self::Legacy, Self::Rex, Self::Zelda, Self::Mtk];
 }
 
 /// Memory-mapped handle to the Kindle's e-ink framebuffer.
@@ -199,6 +202,7 @@ impl Framebuffer {
         match variant {
             UpdateVariant::Legacy => self.send_update_legacy(region, waveform, mode),
             UpdateVariant::Rex => self.send_update_rex(region, waveform, mode),
+            UpdateVariant::Zelda => self.send_update_zelda(region, waveform, mode),
             UpdateVariant::Mtk => self.send_update_mtk(region, waveform, mode),
             UpdateVariant::Unsupported => false,
         }
@@ -251,6 +255,20 @@ impl Framebuffer {
             ..Default::default()
         };
         self.send_update_ioctl(MXCFB_SEND_UPDATE_MTK, &update)
+    }
+
+    /// Issue `MXCFB_SEND_UPDATE_ZELDA` (88-byte struct, KOA2/KOA3 — Oasis 2/3).
+    /// Returns whether the ioctl succeeded.
+    fn send_update_zelda(&self, region: UpdateRect, waveform: u32, mode: u32) -> bool {
+        let update = UpdateRequestZelda {
+            update_region: region,
+            waveform_mode: waveform,
+            update_mode: mode,
+            update_marker: 1,
+            temperature: TEMP_USE_AMBIENT,
+            ..Default::default()
+        };
+        self.send_update_ioctl(MXCFB_SEND_UPDATE_ZELDA, &update)
     }
 
     /// Full-screen GC16 refresh
