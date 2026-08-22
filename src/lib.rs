@@ -29,7 +29,7 @@ use slint::platform::software_renderer::MinimalSoftwareWindow;
 use std::cell::RefCell;
 use std::marker::PhantomData;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -172,6 +172,16 @@ impl KindleBackend<Scheduled> {
 /// Fails if the temp file can't be written, or if Slint already has a
 /// platform set up.
 pub fn install(font_data: &[u8]) -> Result<KindleBackend, slint::PlatformError> {
+    install_with_scale(font_data, 1.0)
+}
+
+/// Like [`install`] but sets a DPI scale factor. The renderer draws at
+/// `physical_size / scale` logical pixels, then upscales to the framebuffer.
+/// For a 300 DPI Kindle Oasis (1264x1680), use 3.0 → logical 421x560.
+pub fn install_with_scale(
+    font_data: &[u8],
+    scale_factor: f32,
+) -> Result<KindleBackend, slint::PlatformError> {
     let path = std::env::temp_dir().join("slint-kindle-default.ttf");
     std::fs::write(&path, font_data)
         .map_err(|e| slint::PlatformError::Other(format!("failed to stage default font: {e}")))?;
@@ -188,6 +198,7 @@ pub fn install(font_data: &[u8]) -> Result<KindleBackend, slint::PlatformError> 
         wake_schedule.clone(),
         on_wake.clone(),
         black_and_white.clone(),
+        scale_factor,
     )
     .map_err(|e| slint::PlatformError::Other(format!("failed to init Kindle platform: {e}")))?;
     let window = platform.window.clone();
@@ -200,4 +211,56 @@ pub fn install(font_data: &[u8]) -> Result<KindleBackend, slint::PlatformError> 
         black_and_white,
         _state: PhantomData,
     })
+}
+
+// ---------------------------------------------------------------------------
+// Screen rotation
+// ---------------------------------------------------------------------------
+
+/// Screen rotation in degrees (0, 90, 180, 270).
+///
+/// Set by the app via [`set_rotation`]. Read by the framebuffer renderer
+/// and touch input handler to transform coordinates.
+/// 0° and 180° keep the same dimensions; 90° and 270° swap width/height.
+static ROTATION: AtomicU32 = AtomicU32::new(0);
+
+/// Fixed render offset determined at launch.
+///
+/// On the Kindle Oasis, the framebuffer's hardware rotation state is set by
+/// the Amazon framework before the app takes over. If the device was at 180°
+/// when the app launched, the framebuffer is already rotated 180° by hardware,
+/// so every render must add 180° to compensate. If launched at 0°, no offset
+/// is needed. This offset is fixed for the entire session — it never changes
+/// at runtime.
+static RENDER_OFFSET: AtomicU32 = AtomicU32::new(0);
+
+/// Set the fixed render offset for this session.
+///
+/// Call once at startup with the initial device rotation (0 or 180).
+/// On the Oasis, pass 180 if the device was held upside-down at launch,
+/// otherwise pass 0.
+pub fn set_render_offset(initial_rotation: u32) {
+    let offset = if initial_rotation == 180 { 180 } else { 0 };
+    RENDER_OFFSET.store(offset, Ordering::Relaxed);
+    log::info!("[kindle] render offset set to {offset}° (initial_rotation={initial_rotation})");
+}
+
+/// Get the fixed render offset for this session.
+pub fn get_render_offset() -> u32 {
+    RENDER_OFFSET.load(Ordering::Relaxed)
+}
+
+/// Set the screen rotation (0, 90, 180, or 270 degrees).
+///
+/// Call before the event loop starts, or from the UI thread to rotate at
+/// runtime. Triggers a full refresh on the next render cycle.
+pub fn set_rotation(degrees: u32) {
+    let normalized = degrees % 360;
+    ROTATION.store(normalized, Ordering::Relaxed);
+    log::info!("[kindle] rotation set to {normalized}°");
+}
+
+/// Get the current screen rotation in degrees (0, 90, 180, or 270).
+pub fn get_rotation() -> u32 {
+    ROTATION.load(Ordering::Relaxed)
 }

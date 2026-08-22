@@ -152,6 +152,14 @@ impl Framebuffer {
         dst.copy_from_slice(pixels);
     }
 
+    /// Write a single pixel at (x, y). Used for 90°/270° rotation where
+    /// rows and columns are transposed and can't be written as a line.
+    pub(crate) fn write_pixel(&mut self, x: usize, y: usize, value: u8) {
+        unsafe {
+            *self.map.add(y * self.stride + x) = value;
+        }
+    }
+
     /// Fill the entire visible area with a single grayscale value (0x00 = black, 0xff = white).
     pub(crate) fn fill(&mut self, value: u8) {
         for y in 0..self.height as usize {
