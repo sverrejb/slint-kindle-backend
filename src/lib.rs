@@ -29,7 +29,7 @@ use slint::platform::software_renderer::MinimalSoftwareWindow;
 use std::cell::RefCell;
 use std::marker::PhantomData;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -257,10 +257,348 @@ pub fn get_render_offset() -> u32 {
 pub fn set_rotation(degrees: u32) {
     let normalized = degrees % 360;
     ROTATION.store(normalized, Ordering::Relaxed);
+    REQUEST_FULL_REFRESH.store(true, Ordering::Relaxed);
     log::info!("[kindle] rotation set to {normalized}°");
 }
 
 /// Get the current screen rotation in degrees (0, 90, 180, or 270).
 pub fn get_rotation() -> u32 {
     ROTATION.load(Ordering::Relaxed)
+}
+
+// ---------------------------------------------------------------------------
+// Sleep screen, suspend, and refresh control
+// ---------------------------------------------------------------------------
+
+/// Shared state for controlling screen refresh behavior.
+pub(crate) static REQUEST_FULL_REFRESH: AtomicBool = AtomicBool::new(false);
+
+/// Set when the device wakes from suspend. The event loop checks this
+/// to force a full re-render (the framebuffer still has the sleep image).
+pub(crate) static WOKE_FROM_SUSPEND: AtomicBool = AtomicBool::new(false);
+
+/// Pre-rendered sleep screen stored as raw framebuffer bytes.
+static SLEEP_SCREEN_CACHE: Mutex<Option<SleepScreenCache>> = Mutex::new(None);
+
+/// Sleep screen background: true = white (default), false = black
+static SLEEP_BG_WHITE: AtomicBool = AtomicBool::new(true);
+
+/// Selected sleep image filename (empty = default).
+static SLEEP_IMAGE_NAME: Mutex<String> = Mutex::new(String::new());
+
+/// Global last-activity timestamp (unix seconds). Updated by the touch
+/// handler on every touch event. The app's idle sleep timer reads this.
+pub static LAST_ACTIVITY: AtomicI64 = AtomicI64::new(0);
+
+/// Reset the last-activity timestamp to now. Called by the touch handler.
+pub(crate) fn touch_activity() {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+    LAST_ACTIVITY.store(now, Ordering::Relaxed);
+}
+
+struct SleepScreenCache {
+    pixels: Vec<u8>,
+    width: u32,
+    height: u32,
+}
+
+/// Cached screen dimensions (set once from the UI thread).
+static SCREEN_W: AtomicU32 = AtomicU32::new(0);
+static SCREEN_H: AtomicU32 = AtomicU32::new(0);
+
+/// Set the sleep screen background color (true = white, false = black).
+pub fn set_sleep_background_white(white: bool) {
+    SLEEP_BG_WHITE.store(white, Ordering::Relaxed);
+}
+
+/// Set the specific sleep image filename to use ("default" = code-generated).
+/// Clears the cache so a stale image from a previous selection isn't used.
+pub fn set_sleep_image_name(name: &str) {
+    *SLEEP_IMAGE_NAME.lock().unwrap() = name.to_string();
+    *SLEEP_SCREEN_CACHE.lock().unwrap() = None;
+    log::info!("[kindle] sleep image name set to '{name}', cache cleared");
+}
+
+/// Cache the screen dimensions. Call once at startup from the UI thread.
+pub fn set_screen_dimensions(w: u32, h: u32) {
+    SCREEN_W.store(w, Ordering::Relaxed);
+    SCREEN_H.store(h, Ordering::Relaxed);
+}
+
+/// Request a full-screen refresh on the next render.
+pub fn request_full_refresh() {
+    REQUEST_FULL_REFRESH.store(true, Ordering::Relaxed);
+}
+
+/// Suspend the device to RAM. Blocks until the device wakes.
+pub fn suspend() {
+    log::info!("[suwayomi] suspending to RAM...");
+    if let Err(e) = crate::power::suspend_to_mem() {
+        log::error!("[suwayomi] suspend failed: {e}");
+    }
+    log::info!("[suwayomi] resumed from suspend");
+}
+
+/// Force the app to re-render and flash the screen to clear the sleep image.
+pub fn wake_refresh() {
+    request_full_refresh();
+    WOKE_FROM_SUSPEND.store(true, Ordering::Relaxed);
+}
+
+/// Draw a sleep screen image to the framebuffer and refresh.
+pub fn show_sleep_screen(sleep_dir: &str) {
+    use std::path::Path;
+
+    let start = std::time::Instant::now();
+
+    let mut fb = match framebuffer::Framebuffer::open() {
+        Ok(fb) => fb,
+        Err(e) => {
+            log::error!("[suwayomi] sleep: failed to open framebuffer: {e}");
+            return;
+        }
+    };
+
+    set_screen_dimensions(fb.width, fb.height);
+
+    let selected_name = SLEEP_IMAGE_NAME.lock().unwrap().clone();
+    let bg_white = SLEEP_BG_WHITE.load(Ordering::Relaxed);
+    log::info!("[suwayomi] sleep: selected='{selected_name}', bg_white={bg_white}, dir={sleep_dir}");
+
+    // Fast path: pre-rendered cache
+    {
+        let cache = SLEEP_SCREEN_CACHE.lock().unwrap();
+        if let Some(ref cached) = *cache {
+            if cached.width == fb.width && cached.height == fb.height {
+                let img_width = cached.width as usize;
+                for y in 0..fb.height as usize {
+                    let row_pixels = &cached.pixels[y * img_width..(y + 1) * img_width];
+                    fb.write_line(y, 0..fb.width as usize, row_pixels);
+                }
+                fb.refresh_full();
+                fb.wait_for_update_complete();
+                log::info!("[suwayomi] sleep: displayed cached image in {:.0}ms", start.elapsed().as_millis());
+                return;
+            } else {
+                log::warn!("[suwayomi] sleep: cache size {}x{} != fb {}x{}, regenerating", cached.width, cached.height, fb.width, fb.height);
+            }
+        } else {
+            log::info!("[suwayomi] sleep: no cache, loading from disk");
+        }
+    }
+
+    // Slow path: decode from disk or generate default
+    let dir = Path::new(sleep_dir);
+    let image_path = if dir.is_dir() {
+        let selected = SLEEP_IMAGE_NAME.lock().unwrap().clone();
+        if !selected.is_empty() && selected != "default" {
+            let path = dir.join(&selected);
+            if path.exists() {
+                log::info!("[suwayomi] sleep: loading custom image: {}", path.display());
+                Some(path)
+            } else {
+                log::warn!("[suwayomi] sleep: custom image '{selected}' not found in {sleep_dir}, using default");
+                None
+            }
+        } else {
+            log::info!("[suwayomi] sleep: no custom image selected, using default");
+            None
+        }
+    } else {
+        log::warn!("[suwayomi] sleep: directory {sleep_dir} does not exist, using default");
+        None
+    };
+
+    let img = if let Some(path) = image_path {
+        match image::open(&path) {
+            Ok(img) => img.to_luma8(),
+            Err(e) => {
+                log::error!("[suwayomi] sleep: failed to decode {}: {e}, using default", path.display());
+                generate_default_sleep_image(fb.width, fb.height)
+            }
+        }
+    } else {
+        generate_default_sleep_image(fb.width, fb.height)
+    };
+
+    let bg = if SLEEP_BG_WHITE.load(Ordering::Relaxed) { 255u8 } else { 0u8 };
+    let img = fit_to_screen(&img, fb.width, fb.height, bg);
+
+    let img_raw: &[u8] = img.as_raw();
+    let img_width = img.width() as usize;
+    for y in 0..fb.height as usize {
+        let row_pixels = &img_raw[y * img_width..(y + 1) * img_width];
+        fb.write_line(y, 0..fb.width as usize, row_pixels);
+    }
+
+    fb.refresh_full();
+    fb.wait_for_update_complete();
+    log::info!("[suwayomi] sleep: displayed in {:.0}ms", start.elapsed().as_millis());
+}
+
+fn fit_to_screen(img: &image::GrayImage, screen_w: u32, screen_h: u32, bg: u8) -> image::GrayImage {
+    use image::ImageBuffer;
+
+    if img.width() == screen_w && img.height() == screen_h {
+        return img.clone();
+    }
+
+    let scale = (screen_w as f64 / img.width() as f64)
+        .min(screen_h as f64 / img.height() as f64);
+    let new_w = ((img.width() as f64 * scale).round() as u32).max(1);
+    let new_h = ((img.height() as f64 * scale).round() as u32).max(1);
+
+    let resized = image::imageops::resize(img, new_w, new_h, image::imageops::FilterType::Nearest);
+
+    let mut canvas: ImageBuffer<image::Luma<u8>, Vec<u8>> =
+        ImageBuffer::from_pixel(screen_w, screen_h, image::Luma([bg]));
+
+    let offset_x = (screen_w - new_w) / 2;
+    let offset_y = (screen_h - new_h) / 2;
+
+    for y in 0..new_h {
+        for x in 0..new_w {
+            canvas.put_pixel(offset_x + x, offset_y + y, *resized.get_pixel(x, y));
+        }
+    }
+
+    canvas
+}
+
+fn generate_default_sleep_image(width: u32, height: u32) -> image::GrayImage {
+    use image::ImageBuffer;
+
+    let mut img: ImageBuffer<image::Luma<u8>, Vec<u8>> =
+        ImageBuffer::from_pixel(width, height, image::Luma([0u8]));
+
+    let cx = width as f32 * 0.5;
+    let cy = height as f32 * 0.4;
+    let moon_r = width as f32 * 0.12;
+    let cutout_offset = moon_r * 0.45;
+    let cutout_r = moon_r * 0.95;
+
+    let stars = [
+        (0.15, 0.20, 3.0f32), (0.82, 0.15, 2.5), (0.25, 0.55, 2.0),
+        (0.75, 0.50, 2.5), (0.10, 0.75, 2.0), (0.90, 0.70, 3.0),
+        (0.50, 0.80, 2.0), (0.35, 0.12, 1.5), (0.65, 0.25, 1.5),
+        (0.05, 0.40, 1.5), (0.95, 0.35, 2.0), (0.45, 0.65, 1.5),
+        (0.70, 0.85, 2.0), (0.20, 0.90, 1.5),
+    ];
+
+    for y in 0..height {
+        for x in 0..width {
+            let xf = x as f32;
+            let yf = y as f32;
+
+            let dx = xf - cx;
+            let dy = yf - cy;
+            let dist = (dx * dx + dy * dy).sqrt();
+
+            let cdx = xf - (cx + cutout_offset);
+            let cdy = yf - cy;
+            let cutout_dist = (cdx * cdx + cdy * cdy).sqrt();
+
+            let in_moon = dist < moon_r;
+            let in_cutout = cutout_dist < cutout_r;
+            let in_crescent = in_moon && !in_cutout;
+
+            let mut is_star = false;
+            for &(sx, sy, sr) in &stars {
+                let sdx = xf - sx * width as f32;
+                let sdy = yf - sy * height as f32;
+                let sdist = (sdx * sdx + sdy * sdy).sqrt();
+                if sdist < sr {
+                    is_star = true;
+                    break;
+                }
+            }
+
+            if in_crescent || is_star {
+                img.put_pixel(x, y, image::Luma([255u8]));
+            }
+        }
+    }
+
+    img
+}
+
+fn screen_dimensions() -> (u32, u32) {
+    let w = SCREEN_W.load(Ordering::Relaxed);
+    let h = SCREEN_H.load(Ordering::Relaxed);
+    if w > 0 && h > 0 {
+        return (w, h);
+    }
+    match crate::framebuffer::Framebuffer::open() {
+        Ok(fb) => (fb.width, fb.height),
+        Err(_) => (1072, 1448),
+    }
+}
+
+static PRE_RENDER_GEN: AtomicU32 = AtomicU32::new(0);
+
+pub fn new_pre_render_generation() -> u32 {
+    PRE_RENDER_GEN.fetch_add(1, Ordering::SeqCst) + 1
+}
+
+fn is_current_generation(generation: u32) -> bool {
+    PRE_RENDER_GEN.load(Ordering::SeqCst) == generation
+}
+
+pub fn preload_sleep_screen_from_file(path: &std::path::Path) {
+    let img = match image::open(path) {
+        Ok(img) => img.to_luma8(),
+        Err(e) => {
+            log::error!("[suwayomi] preload_sleep: failed to decode {}: {e}", path.display());
+            return;
+        }
+    };
+    preload_sleep_screen_from_image(&img);
+}
+
+pub fn preload_sleep_screen_from_image(img: &image::GrayImage) {
+    let start = std::time::Instant::now();
+    let generation = new_pre_render_generation();
+    let (w, h) = screen_dimensions();
+
+    let bg = if SLEEP_BG_WHITE.load(Ordering::Relaxed) { 255u8 } else { 0u8 };
+    let img = fit_to_screen(img, w, h, bg);
+
+    if !is_current_generation(generation) {
+        log::info!("[suwayomi] preload_sleep: superseded, discarding");
+        return;
+    }
+
+    let cache = SleepScreenCache {
+        pixels: img.as_raw().clone(),
+        width: w,
+        height: h,
+    };
+
+    *SLEEP_SCREEN_CACHE.lock().unwrap() = Some(cache);
+    log::info!("[suwayomi] preload_sleep: cached in {:.0}ms", start.elapsed().as_millis());
+}
+
+pub fn clear_sleep_screen_cache() {
+    *SLEEP_SCREEN_CACHE.lock().unwrap() = None;
+}
+
+pub fn preload_default_sleep_screen() {
+    let generation = new_pre_render_generation();
+    let (w, h) = screen_dimensions();
+    let img = generate_default_sleep_image(w, h);
+
+    if !is_current_generation(generation) {
+        return;
+    }
+
+    let cache = SleepScreenCache {
+        pixels: img.as_raw().clone(),
+        width: w,
+        height: h,
+    };
+    *SLEEP_SCREEN_CACHE.lock().unwrap() = Some(cache);
+    log::info!("[suwayomi] preload_default_sleep: cached {}x{}", w, h);
 }

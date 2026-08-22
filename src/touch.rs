@@ -182,7 +182,9 @@ impl TouchInput {
 
     /// Read any waiting touch events and forward them to the window as pointer events.
     pub(crate) fn poll(&mut self, window: &MinimalSoftwareWindow) {
+        let mut had_events = false;
         while let Some(event) = self.read_event() {
+            had_events = true;
             match (event.kind, event.code) {
                 (EVENT_ABSOLUTE_AXIS, TOUCH_SLOT) => {
                     self.active_slot = event.value;
@@ -210,6 +212,9 @@ impl TouchInput {
                 (EVENT_SYNC, SYNC_REPORT) => self.commit(window),
                 _ => {}
             }
+        }
+        if had_events {
+            crate::touch_activity();
         }
     }
 
