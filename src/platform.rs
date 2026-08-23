@@ -310,9 +310,10 @@ impl Platform for KindlePlatform {
                     );
                 }
 
-                if full_refresh || rotation_changed {
-                    frame_buffer.refresh_full();
-                } else {
+                // full_reblit below will call refresh_full() for the
+                // full_refresh/rotation_changed cases, so only do a partial
+                // refresh here when those aren't active.
+                if !full_refresh && !rotation_changed {
                     let (fb_origin, fb_size) = match render_rotation {
                         180 => {
                             let fb_x0 = fb_w.saturating_sub(x0 + w);

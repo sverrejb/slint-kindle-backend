@@ -266,6 +266,19 @@ pub fn get_rotation() -> u32 {
     ROTATION.load(Ordering::Relaxed)
 }
 
+/// Enable or disable dark mode (framebuffer inversion).
+/// When enabled, all pixels written to the framebuffer are inverted.
+pub fn set_invert(enabled: bool) {
+    framebuffer::set_invert(enabled);
+    REQUEST_FULL_REFRESH.store(true, Ordering::Relaxed);
+    log::info!("[kindle] invert (dark mode) set to {enabled}");
+}
+
+/// Check if dark mode (framebuffer inversion) is currently enabled.
+pub fn is_inverted() -> bool {
+    framebuffer::is_inverted()
+}
+
 // ---------------------------------------------------------------------------
 // Sleep screen, suspend, and refresh control
 // ---------------------------------------------------------------------------
@@ -373,6 +386,18 @@ pub fn show_sleep_screen(sleep_dir: &str) {
         let cache = SLEEP_SCREEN_CACHE.lock().unwrap();
         if let Some(ref cached) = *cache {
             if cached.width == fb.width && cached.height == fb.height {
+                // Double flash: flash to inverse background first to clear
+                // heavy ghosting, then write the sleep image and flash again.
+                let bg = if SLEEP_BG_WHITE.load(Ordering::Relaxed) { 255u8 } else { 0u8 };
+                let inverse_bg = if bg == 255 { 0u8 } else { 255u8 };
+                let blank = vec![inverse_bg; fb.width as usize * fb.height as usize];
+                for y in 0..fb.height as usize {
+                    fb.write_line(y, 0..fb.width as usize, &blank[y * fb.width as usize..(y + 1) * fb.width as usize]);
+                }
+                fb.refresh_full();
+                fb.wait_for_update_complete();
+
+                // Now write the cached sleep image
                 let img_width = cached.width as usize;
                 for y in 0..fb.height as usize {
                     let row_pixels = &cached.pixels[y * img_width..(y + 1) * img_width];
@@ -412,6 +437,18 @@ pub fn show_sleep_screen(sleep_dir: &str) {
         None
     };
 
+    // Double flash to clear heavy ghosting: flash to the inverse of the
+    // background, wait, then write the actual sleep image and flash again.
+    let bg = if SLEEP_BG_WHITE.load(Ordering::Relaxed) { 255u8 } else { 0u8 };
+    let inverse_bg = if bg == 255 { 0u8 } else { 255u8 };
+    let blank = vec![inverse_bg; fb.width as usize * fb.height as usize];
+    for y in 0..fb.height as usize {
+        fb.write_line(y, 0..fb.width as usize, &blank[y * fb.width as usize..(y + 1) * fb.width as usize]);
+    }
+    fb.refresh_full();
+    fb.wait_for_update_complete();
+
+    // Now write the actual sleep image
     let img = if let Some(path) = image_path {
         match image::open(&path) {
             Ok(img) => img.to_luma8(),
@@ -424,7 +461,6 @@ pub fn show_sleep_screen(sleep_dir: &str) {
         generate_default_sleep_image(fb.width, fb.height)
     };
 
-    let bg = if SLEEP_BG_WHITE.load(Ordering::Relaxed) { 255u8 } else { 0u8 };
     let img = fit_to_screen(&img, fb.width, fb.height, bg);
 
     let img_raw: &[u8] = img.as_raw();

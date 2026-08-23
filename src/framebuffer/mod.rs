@@ -13,6 +13,20 @@ use ffi::{
 };
 
 /// Which MXCFB update ioctl this kernel accepts, varies with the Kindle model
+/// Global invert flag — when true, all pixels written to the framebuffer are
+/// inverted (255 - value). Set via `set_invert()` from the app.
+static INVERT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Enable or disable framebuffer inversion (dark mode).
+pub fn set_invert(enabled: bool) {
+    INVERT.store(enabled, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Check if inversion is currently enabled.
+pub fn is_inverted() -> bool {
+    INVERT.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 ///
 //We probe on first refresh and remember the winner instead of retrying the failing ioctl every frame.
 #[derive(Clone, Copy)]
@@ -152,24 +166,32 @@ impl Framebuffer {
                 pixels.len(),
             )
         };
-        dst.copy_from_slice(pixels);
+        if is_inverted() {
+            for (d, s) in dst.iter_mut().zip(pixels.iter()) {
+                *d = 255 - *s;
+            }
+        } else {
+            dst.copy_from_slice(pixels);
+        }
     }
 
     /// Write a single pixel at (x, y). Used for 90°/270° rotation where
     /// rows and columns are transposed and can't be written as a line.
     pub(crate) fn write_pixel(&mut self, x: usize, y: usize, value: u8) {
+        let v = if is_inverted() { 255 - value } else { value };
         unsafe {
-            *self.map.add(y * self.stride + x) = value;
+            *self.map.add(y * self.stride + x) = v;
         }
     }
 
     /// Fill the entire visible area with a single grayscale value (0x00 = black, 0xff = white).
     pub(crate) fn fill(&mut self, value: u8) {
+        let v = if is_inverted() { 255 - value } else { value };
         for y in 0..self.height as usize {
             let dst = unsafe {
                 std::slice::from_raw_parts_mut(self.map.add(y * self.stride), self.width as usize)
             };
-            dst.fill(value);
+            dst.fill(v);
         }
     }
 
