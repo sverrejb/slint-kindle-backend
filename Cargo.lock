@@ -4107,7 +4107,7 @@ dependencies = [
 
 [[package]]
 name = "slint-backend-kindle"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "fontdb",
  "fontique",
