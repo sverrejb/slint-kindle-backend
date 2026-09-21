@@ -148,6 +148,26 @@ pub(super) struct UpdateRequestMtk {
     pub(super) ts_epdc: u32,
 }
 
+// Zelda-based Kindles (KOA2, KOA3 — Oasis 2/3). Same as MTK but without
+// swipe_data, making it 88 bytes instead of 96.
+#[repr(C)]
+#[derive(Default)]
+pub(super) struct UpdateRequestZelda {
+    pub(super) update_region: UpdateRect,
+    pub(super) waveform_mode: u32,
+    pub(super) update_mode: u32,
+    pub(super) update_marker: u32,
+    pub(super) temperature: i32,
+    pub(super) flags: u32,
+    pub(super) dither_mode: i32,
+    pub(super) quant_bit: i32,
+    pub(super) alternate_buffer: AlternateBuffer,
+    pub(super) hist_bw_waveform_mode: u32,
+    pub(super) hist_gray_waveform_mode: u32,
+    pub(super) ts_pxp: u32,
+    pub(super) ts_epdc: u32,
+}
+
 // Kindle EPDC ioctl and constants.
 // The ioctl number was confirmed by stracing `eips` on a real device.
 pub(super) const MXCFB_SEND_UPDATE: libc::c_ulong = 0x4048_462e;
@@ -155,11 +175,15 @@ pub(super) const MXCFB_SEND_UPDATE: libc::c_ulong = 0x4048_462e;
 // ioctl number for Kindle Paperwhite 10th gen, from strace.
 pub(super) const MXCFB_SEND_UPDATE_REX: libc::c_ulong = 0x4050_462e;
 
+// _IOW('F', 0x2E, struct mxcfb_update_data_zelda) 88-byte struct on KOA2/KOA3.
+pub(super) const MXCFB_SEND_UPDATE_ZELDA: libc::c_ulong = 0x4058_462e;
+
 // _IOW('F', 0x2E, struct mxcfb_update_data_mtk) 96-byte struct on MTK devices.
 pub(super) const MXCFB_SEND_UPDATE_MTK: libc::c_ulong = 0x4060_462e;
 
 const _: () = assert!(std::mem::size_of::<UpdateRequest>() == 72);
 const _: () = assert!(std::mem::size_of::<UpdateRequestRex>() == 80);
+const _: () = assert!(std::mem::size_of::<UpdateRequestZelda>() == 88);
 const _: () = assert!(std::mem::size_of::<UpdateRequestMtk>() == 96);
 
 // Blocks until the EPDC has finished applying the update with a given marker.
