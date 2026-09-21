@@ -6,12 +6,27 @@ use std::os::fd::AsRawFd;
 
 use ffi::{
     FBIOGET_FSCREENINFO, FBIOGET_VSCREENINFO, FbFixScreeninfo, FbVarScreeninfo, MXCFB_SEND_UPDATE,
-    MXCFB_SEND_UPDATE_MTK, MXCFB_SEND_UPDATE_REX, MXCFB_WAIT_FOR_UPDATE_COMPLETE, TEMP_USE_AMBIENT,
-    UPDATE_MODE_FULL, UPDATE_MODE_PARTIAL, UpdateMarkerData, UpdateRect, UpdateRequest,
-    UpdateRequestMtk, UpdateRequestRex, WAVEFORM_MODE_AUTO, WAVEFORM_MODE_GC16,
+    MXCFB_SEND_UPDATE_MTK, MXCFB_SEND_UPDATE_REX, MXCFB_SEND_UPDATE_ZELDA,
+    MXCFB_WAIT_FOR_UPDATE_COMPLETE, TEMP_USE_AMBIENT, UPDATE_MODE_FULL, UPDATE_MODE_PARTIAL,
+    UpdateMarkerData, UpdateRect, UpdateRequest, UpdateRequestMtk, UpdateRequestRex,
+    UpdateRequestZelda, WAVEFORM_MODE_AUTO, WAVEFORM_MODE_GC16,
 };
 
 /// Which MXCFB update ioctl this kernel accepts, varies with the Kindle model
+/// Global invert flag — when true, all pixels written to the framebuffer are
+/// inverted (255 - value). Set via `set_invert()` from the app.
+static INVERT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Enable or disable framebuffer inversion (dark mode).
+pub fn set_invert(enabled: bool) {
+    INVERT.store(enabled, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Check if inversion is currently enabled.
+pub fn is_inverted() -> bool {
+    INVERT.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 ///
 //We probe on first refresh and remember the winner instead of retrying the failing ioctl every frame.
 #[derive(Clone, Copy)]
@@ -20,6 +35,8 @@ enum UpdateVariant {
     Legacy,
     /// `MXCFB_SEND_UPDATE_REX` — 80-byte struct, Paperwhite 10th gen and newer.
     Rex,
+    /// `MXCFB_SEND_UPDATE_ZELDA` — 88-byte struct, KOA2/KOA3 (Oasis 2/3).
+    Zelda,
     /// `MXCFB_SEND_UPDATE_MTK` — 96-byte struct, MediaTek devices (Basic 2022,
     /// Paperwhite 5, Scribe).
     Mtk,
@@ -30,7 +47,7 @@ enum UpdateVariant {
 
 impl UpdateVariant {
     /// Probed oldest ABI first.
-    const PROBE_ORDER: [UpdateVariant; 3] = [Self::Legacy, Self::Rex, Self::Mtk];
+    const PROBE_ORDER: [UpdateVariant; 4] = [Self::Legacy, Self::Rex, Self::Zelda, Self::Mtk];
 }
 
 /// Memory-mapped handle to the Kindle's e-ink framebuffer.
@@ -149,16 +166,32 @@ impl Framebuffer {
                 pixels.len(),
             )
         };
-        dst.copy_from_slice(pixels);
+        if is_inverted() {
+            for (d, s) in dst.iter_mut().zip(pixels.iter()) {
+                *d = 255 - *s;
+            }
+        } else {
+            dst.copy_from_slice(pixels);
+        }
+    }
+
+    /// Write a single pixel at (x, y). Used for 90°/270° rotation where
+    /// rows and columns are transposed and can't be written as a line.
+    pub(crate) fn write_pixel(&mut self, x: usize, y: usize, value: u8) {
+        let v = if is_inverted() { 255 - value } else { value };
+        unsafe {
+            *self.map.add(y * self.stride + x) = v;
+        }
     }
 
     /// Fill the entire visible area with a single grayscale value (0x00 = black, 0xff = white).
     pub(crate) fn fill(&mut self, value: u8) {
+        let v = if is_inverted() { 255 - value } else { value };
         for y in 0..self.height as usize {
             let dst = unsafe {
                 std::slice::from_raw_parts_mut(self.map.add(y * self.stride), self.width as usize)
             };
-            dst.fill(value);
+            dst.fill(v);
         }
     }
 
@@ -199,6 +232,7 @@ impl Framebuffer {
         match variant {
             UpdateVariant::Legacy => self.send_update_legacy(region, waveform, mode),
             UpdateVariant::Rex => self.send_update_rex(region, waveform, mode),
+            UpdateVariant::Zelda => self.send_update_zelda(region, waveform, mode),
             UpdateVariant::Mtk => self.send_update_mtk(region, waveform, mode),
             UpdateVariant::Unsupported => false,
         }
@@ -251,6 +285,20 @@ impl Framebuffer {
             ..Default::default()
         };
         self.send_update_ioctl(MXCFB_SEND_UPDATE_MTK, &update)
+    }
+
+    /// Issue `MXCFB_SEND_UPDATE_ZELDA` (88-byte struct, KOA2/KOA3 — Oasis 2/3).
+    /// Returns whether the ioctl succeeded.
+    fn send_update_zelda(&self, region: UpdateRect, waveform: u32, mode: u32) -> bool {
+        let update = UpdateRequestZelda {
+            update_region: region,
+            waveform_mode: waveform,
+            update_mode: mode,
+            update_marker: 1,
+            temperature: TEMP_USE_AMBIENT,
+            ..Default::default()
+        };
+        self.send_update_ioctl(MXCFB_SEND_UPDATE_ZELDA, &update)
     }
 
     /// Full-screen GC16 refresh
