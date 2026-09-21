@@ -5,5 +5,5 @@ edition = "2024"
 publish = false
 
 [dependencies]
-slint = { version = "1.16", default-features = false, features = ["compat-1-2", "std", "renderer-software"] }
+slint = { version = "1.18", default-features = false, features = ["compat-1-2", "std", "renderer-software"] }
 slint-backend-kindle = { path = "../.." }

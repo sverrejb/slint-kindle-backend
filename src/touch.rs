@@ -228,7 +228,7 @@ impl TouchInput {
             return;
         }
         self.pressed = false;
-        let _ = window.try_dispatch_event(WindowEvent::PointerReleased {
+        let _ = window.dispatch_event_with_result(WindowEvent::PointerReleased {
             position: LogicalPosition::new(self.x, self.y),
             button: PointerEventButton::Left,
         });
@@ -255,7 +255,7 @@ impl TouchInput {
                 button: PointerEventButton::Left,
             }
         };
-        let _ = window.try_dispatch_event(pointer_event);
+        let _ = window.dispatch_event_with_result(pointer_event);
     }
 }
 
