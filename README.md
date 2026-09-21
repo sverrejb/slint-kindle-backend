@@ -159,7 +159,7 @@ So far, the backend has been tested to work on:
 * Kindle Paperwhite 7th gen (PW3).
 * Kindle Paperwhite 10th gen (PW4) - Thanks, [gmemstr](https://github.com/gmemstr)!
 * Kindle Touch 4th gen - Thanks, [cmeister2](https://github.com/cmeister2)!
-* Kindle Oasis 3rd gen (KOA3) - Thanks, [justinledwards](https://github.com/justinledwards)!
+* Kindle Oasis 3rd gen (KOA3) - Thanks, [yoanhg421](https://github.com/yoanhg421)!
  
 
 ## Roadmap
