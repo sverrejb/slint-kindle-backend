@@ -4206,6 +4206,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "slint-kindle-showcase"
+version = "0.1.0"
+dependencies = [
+ "slint",
+ "slint-backend-kindle",
+ "slint-build",
+]
+
+[[package]]
 name = "slint-macros"
 version = "1.18.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

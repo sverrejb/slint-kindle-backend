@@ -1,0 +1,835 @@
+import "../../LiberationSans-Regular.ttf";
+import "../fonts/LiberationSans-Bold.ttf";
+import "../fonts/DejaVuSerif.ttf";
+import "../fonts/DejaVuSansMono.ttf";
+
+global Theme {
+    in-out property <bool> dark: false;
+    out property <color> fg: dark ? #ffffff : #000000;
+    out property <color> bg: dark ? #000000 : #ffffff;
+    out property <color> press: dark ? #444444 : #dddddd;
+}
+
+component PillButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> active: false;
+    in property <length> font-size: 16px;
+    callback clicked;
+
+    height: root.font-size * 2.4;
+    border-radius: self.height / 2;
+    border-width: 2px;
+    border-color: Theme.fg;
+    background: ta.pressed ? Theme.press : (root.active ? Theme.fg : Theme.bg);
+
+    Text {
+        text: root.text;
+        font-family: "Liberation Sans";
+        font-weight: 700;
+        font-size: root.font-size;
+        color: root.active ? Theme.bg : Theme.fg;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        x: 0; y: 0;
+        width: 100%; height: 100%;
+    }
+
+    ta := TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
+component Card inherits Rectangle {
+    border-radius: 14px;
+    border-width: 2px;
+    border-color: Theme.fg;
+    background: Theme.bg;
+}
+
+component Slider inherits Rectangle {
+    in-out property <float> value: 50;
+    // Trigger change on finger lift-off.
+    out property <float> settled: ta.pressed ? self.held : self.value;
+    property <float> held;
+    height: 28px;
+
+    Rectangle {
+        clip: true;
+        y: (parent.height - self.height) / 2;
+        height: parent.height * 0.28;
+        width: 100%;
+        border-radius: self.height / 2;
+        border-width: 2px;
+        border-color: Theme.fg;
+        background: Theme.bg;
+
+        Rectangle {
+            x: 0; y: 0;
+            height: 100%;
+            width: parent.width * root.value / 100;
+            background: Theme.fg;
+        }
+    }
+
+    Rectangle {
+        width: root.height;
+        height: root.height;
+        x: (root.width - self.width) * root.value / 100;
+        border-radius: self.width / 2;
+        border-width: 2px;
+        border-color: Theme.fg;
+        background: Theme.bg;
+    }
+
+    ta := TouchArea {
+        pointer-event(e) => { if (e.kind == PointerEventKind.down) { root.held = root.value; } }
+        moved => { root.value = max(0, min(100, self.mouse-x / root.width * 100)); }
+        clicked => { root.value = max(0, min(100, self.mouse-x / root.width * 100)); }
+    }
+}
+
+component Toggle inherits Rectangle {
+    in-out property <bool> on: false;
+    width: 58px;
+    height: 30px;
+    border-radius: self.height / 2;
+    border-width: 2px;
+    border-color: Theme.fg;
+    background: root.on ? Theme.fg : Theme.bg;
+
+    Rectangle {
+        width: parent.height - 8px;
+        height: parent.height - 8px;
+        y: 4px;
+        x: root.on ? parent.width - self.width - 4px : 4px;
+        border-radius: self.width / 2;
+        background: root.on ? Theme.bg : Theme.fg;
+        animate x { duration: 150ms; easing: ease-out; }
+    }
+
+    TouchArea {
+        clicked => { root.on = !root.on; }
+    }
+}
+
+component Stepper inherits Rectangle {
+    in-out property <int> value: 4;
+    property <int> minv: 0;
+    property <int> maxv: 9;
+    in property <length> font-size: 16px;
+
+    height: root.font-size * 2.4;
+    border-radius: self.height / 2;
+    border-width: 2px;
+    border-color: Theme.fg;
+    background: Theme.bg;
+    clip: true;
+
+    HorizontalLayout {
+        minus := Rectangle {
+            width: root.height;
+            background: minus-ta.pressed ? Theme.press : transparent;
+            Text {
+                text: "−";
+                font-family: "Liberation Sans";
+                font-size: root.font-size;
+                color: Theme.fg;
+                x: 0; y: 0; width: 100%; height: 100%;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+            minus-ta := TouchArea {
+                clicked => { if (root.value > root.minv) { root.value -= 1; } }
+            }
+        }
+        Text {
+            text: "\{root.value}";
+            font-family: "DejaVu Sans Mono";
+            font-size: root.font-size;
+            color: Theme.fg;
+            horizontal-stretch: 1;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+        plus := Rectangle {
+            width: root.height;
+            background: plus-ta.pressed ? Theme.press : transparent;
+            Text {
+                text: "+";
+                font-family: "Liberation Sans";
+                font-size: root.font-size;
+                color: Theme.fg;
+                x: 0; y: 0; width: 100%; height: 100%;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+            plus-ta := TouchArea {
+                clicked => { if (root.value < root.maxv) { root.value += 1; } }
+            }
+        }
+    }
+}
+
+component StarRating inherits Rectangle {
+    in-out property <int> value: 3;
+    in property <length> star-size: 24px;
+
+    height: root.star-size;
+    HorizontalLayout {
+        spacing: root.star-size * 0.15;
+        for i in [1, 2, 3, 4, 5]: Rectangle {
+            width: root.star-size;
+            Text {
+                text: i <= root.value ? "★" : "☆";
+                font-family: "DejaVu Sans Mono";
+                font-size: root.star-size;
+                color: Theme.fg;
+                x: 0; y: 0; width: 100%; height: 100%;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+            TouchArea {
+                clicked => { root.value = i; }
+            }
+        }
+    }
+}
+
+export component AppWindow inherits Window {
+    background: Theme.bg;
+
+    in property <string> platform-name: "unknown";
+    callback quit();
+
+    property <int> tab: 0;
+
+    property <float> text-scale: 0.8 + size-slider.settled / 250;
+    property <length> fs-h1: root.width * 0.065 * root.text-scale;
+    property <length> fs-h2: root.width * 0.042 * root.text-scale;
+    property <length> fs-body: root.width * 0.032 * root.text-scale;
+    property <length> fs-small: root.width * 0.024 * root.text-scale;
+    property <length> gap: root.width * 0.03;
+    property <length> pad: root.width * 0.045;
+
+    VerticalLayout {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+        padding: root.pad;
+        spacing: root.gap;
+
+        HorizontalLayout {
+            spacing: root.gap;
+            Text {
+                text: "Slint";
+                font-family: "Liberation Sans";
+                font-weight: 700;
+                font-size: root.fs-h1;
+                color: Theme.fg;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+            }
+            quit-btn := Rectangle {
+                width: root.fs-h1 * 1.3;
+                height: root.fs-h1 * 1.3;
+                border-radius: self.width / 2;
+                border-width: 2px;
+                border-color: Theme.fg;
+                background: quit-ta.pressed ? Theme.press : Theme.bg;
+                Text {
+                    text: "×";
+                    font-family: "Liberation Sans";
+                    font-size: root.fs-h1 * 0.8;
+                    color: Theme.fg;
+                    x: 0; y: 0; width: 100%; height: 100%;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+                quit-ta := TouchArea {
+                    clicked => { root.quit(); }
+                }
+            }
+        }
+
+        HorizontalLayout {
+            spacing: root.gap * 0.6;
+            for name[i] in ["Controls", "Type", "Cards", "Charts", "Sketch"]: PillButton {
+                text: name;
+                font-size: root.fs-body;
+                active: root.tab == i;
+                clicked => { root.tab = i; }
+            }
+        }
+
+        Rectangle {
+            vertical-stretch: 1;
+            clip: true;
+
+            Rectangle {
+                width: parent.width;
+                height: parent.height;
+                x: (0 - root.tab) * parent.width;
+
+                VerticalLayout {
+                    spacing: root.gap;
+
+                    Text {
+                        text: "Controls";
+                        font-family: "Liberation Sans";
+                        font-weight: 700;
+                        font-size: root.fs-h2;
+                        color: Theme.fg;
+                    }
+
+                    Card {
+                        vertical-stretch: 1;
+                        VerticalLayout {
+                            padding: root.pad;
+                            spacing: root.gap;
+
+                            HorizontalLayout {
+                                spacing: root.gap;
+                                Text {
+                                    text: "Size";
+                                    font-family: "Liberation Sans";
+                                    font-size: root.fs-body;
+                                    color: Theme.fg;
+                                    vertical-alignment: center;
+                                }
+                                size-slider := Slider {
+                                    value: 50;
+                                    height: root.width * 0.06;
+                                    horizontal-stretch: 1;
+                                }
+                                Text {
+                                    text: "\{round(size-slider.value)}";
+                                    font-family: "DejaVu Sans Mono";
+                                    font-size: root.fs-body;
+                                    color: Theme.fg;
+                                    vertical-alignment: center;
+                                    width: root.fs-body * 2.5;
+                                    horizontal-alignment: right;
+                                }
+                            }
+
+
+                            Rectangle { height: 1px; background: Theme.fg; }
+
+                            HorizontalLayout {
+                                spacing: root.gap;
+                                Text {
+                                    text: "Items";
+                                    font-family: "Liberation Sans";
+                                    font-size: root.fs-body;
+                                    color: Theme.fg;
+                                    vertical-alignment: center;
+                                    horizontal-stretch: 1;
+                                }
+                                item-stepper := Stepper {
+                                    value: 4;
+                                    font-size: root.fs-body;
+                                    width: root.width * 0.34;
+                                }
+                            }
+
+                            Rectangle { height: 1px; background: Theme.fg; }
+
+                            HorizontalLayout {
+                                spacing: root.gap;
+                                Text {
+                                    text: "Dark mode";
+                                    font-family: "Liberation Sans";
+                                    font-size: root.fs-body;
+                                    color: Theme.fg;
+                                    vertical-alignment: center;
+                                    horizontal-stretch: 1;
+                                }
+                                Toggle {
+                                    on <=> Theme.dark;
+                                    width: root.width * 0.13;
+                                    height: root.width * 0.068;
+                                }
+                                Text {
+                                    text: Theme.dark ? "dark" : "light";
+                                    font-family: "DejaVu Sans Mono";
+                                    font-size: root.fs-body;
+                                    color: Theme.fg;
+                                    vertical-alignment: center;
+                                    width: root.fs-body * 4;
+                                }
+                            }
+
+                            Rectangle { vertical-stretch: 1; }
+
+                            HorizontalLayout {
+                                alignment: end;
+                                PillButton {
+                                    text: "Reset";
+                                    font-size: root.fs-body;
+                                    width: root.width * 0.3;
+                                    clicked => {
+                                        size-slider.value = 50;
+                                        item-stepper.value = 4;
+                                        Theme.dark = false;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Rectangle {
+                width: parent.width;
+                height: parent.height;
+                x: (1 - root.tab) * parent.width;
+
+                VerticalLayout {
+                    spacing: root.gap;
+                    Text {
+                        text: "Lorem ipsum";
+                        font-family: "Liberation Sans";
+                        font-weight: 700;
+                        font-size: root.fs-h2;
+                        color: Theme.fg;
+                    }
+                    Text {
+                        text: "dolor sit amet · consectetur";
+                        font-family: "DejaVu Sans Mono";
+                        font-size: root.fs-small;
+                        color: Theme.fg;
+                    }
+                    Card {
+                        vertical-stretch: 1;
+                        VerticalLayout {
+                            padding: root.pad;
+                            spacing: root.gap * 0.5;
+
+                            Text {
+                                text: "SANS — Liberation";
+                                font-family: "DejaVu Sans Mono";
+                                font-size: root.fs-small;
+                                color: Theme.fg;
+                            }
+                            Text {
+                                text: "Lorem ipsum dolor sit amet, consectetur adipiscing elit.";
+                                font-family: "Liberation Sans";
+                                font-size: root.fs-body;
+                                color: Theme.fg;
+                                wrap: word-wrap;
+                            }
+                            Rectangle { height: 1px; background: Theme.fg; }
+
+                            Text {
+                                text: "SERIF — DejaVu";
+                                font-family: "DejaVu Sans Mono";
+                                font-size: root.fs-small;
+                                color: Theme.fg;
+                            }
+                            Text {
+                                text: "Sed do eiusmod tempor incididunt ut labore et dolore.";
+                                font-family: "DejaVu Serif";
+                                font-size: root.fs-body;
+                                color: Theme.fg;
+                                wrap: word-wrap;
+                            }
+                            Rectangle { height: 1px; background: Theme.fg; }
+
+                            Text {
+                                text: "MONO — DejaVu";
+                                font-family: "DejaVu Sans Mono";
+                                font-size: root.fs-small;
+                                color: Theme.fg;
+                            }
+                            Text {
+                                text: "ut.enim(ad, minim) -> veniam; quis nostrud.";
+                                font-family: "DejaVu Sans Mono";
+                                font-size: root.fs-body;
+                                color: Theme.fg;
+                                wrap: word-wrap;
+                            }
+                            Rectangle { vertical-stretch: 1; }
+                        }
+                    }
+                }
+            }
+
+            cards-page := Rectangle {
+                width: parent.width;
+                height: parent.height;
+                x: (2 - root.tab) * parent.width;
+
+                property <float> card-offset: 0;
+                property <int> per-page: 2;
+                property <int> card-count: 6;
+                property <int> max-offset: max(0, self.card-count - self.per-page);
+                property <length> stride: viewport.height / self.per-page;
+
+                VerticalLayout {
+                    spacing: root.gap;
+
+                    Text {
+                        text: "Cards";
+                        font-family: "Liberation Sans";
+                        font-weight: 700;
+                        font-size: root.fs-h2;
+                        color: Theme.fg;
+                    }
+
+                    HorizontalLayout {
+                        vertical-stretch: 1;
+                        spacing: root.gap * 0.5;
+
+                        viewport := Rectangle {
+                            horizontal-stretch: 1;
+                            clip: true;
+
+                            TouchArea {
+                                property <length> start-y;
+                                pointer-event(e) => {
+                                    if (e.kind == PointerEventKind.down) {
+                                        self.start-y = self.mouse-y;
+                                    }
+                                    if (e.kind == PointerEventKind.up) {
+                                        cards-page.card-offset = max(0, min(cards-page.max-offset, cards-page.card-offset + round((self.start-y - self.mouse-y) / cards-page.stride)));
+                                    }
+                                }
+                            }
+
+                            for card[i] in [
+                                { title: "Lorem", tag: "new", body: "Ipsum dolor sit amet, consectetur adipiscing elit sed do eiusmod." },
+                                { title: "Eiusmod", tag: "alpha", body: "Tempor incididunt ut labore et dolore magna aliqua enim ad minim." },
+                                { title: "Veniam", tag: "beta", body: "Quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea." },
+                                { title: "Commodo", tag: "rc", body: "Consequat duis aute irure dolor in reprehenderit voluptate velit." },
+                                { title: "Cillum", tag: "v2", body: "Esse cillum dolore eu fugiat nulla pariatur excepteur sint occaecat." },
+                                { title: "Cupidatat", tag: "lts", body: "Non proident sunt in culpa qui officia deserunt mollit anim id." },
+                            ]: Card {
+                                width: 100%;
+                                height: cards-page.stride - root.gap;
+                                y: (i - cards-page.card-offset) * cards-page.stride;
+
+                                VerticalLayout {
+                                    padding: root.pad;
+                                    spacing: root.gap * 0.4;
+
+                                    HorizontalLayout {
+                                        spacing: root.gap;
+                                        Text {
+                                            text: card.title;
+                                            font-family: "DejaVu Serif";
+                                            font-size: root.fs-h2;
+                                            color: Theme.fg;
+                                            horizontal-stretch: 1;
+                                            vertical-alignment: center;
+                                        }
+                                        Rectangle {
+                                            border-radius: root.fs-small;
+                                            border-width: 2px;
+                                            border-color: Theme.fg;
+                                            background: Theme.bg;
+                                            width: chip.preferred-width + root.pad;
+                                            height: root.fs-small * 2;
+                                            chip := Text {
+                                                text: card.tag;
+                                                font-family: "DejaVu Sans Mono";
+                                                font-size: root.fs-small;
+                                                color: Theme.fg;
+                                                x: 0; y: 0; width: 100%; height: 100%;
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                            }
+                                        }
+                                    }
+
+                                    Text {
+                                        text: card.body;
+                                        font-family: "Liberation Sans";
+                                        font-size: root.fs-body;
+                                        color: Theme.fg;
+                                        wrap: word-wrap;
+                                    }
+
+                                    Rectangle { vertical-stretch: 1; }
+
+                                    StarRating {
+                                        star-size: root.fs-h2;
+                                    }
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            width: root.width * 0.022;
+                            border-width: 2px;
+                            border-color: Theme.fg;
+                            border-radius: self.width / 2;
+                            background: Theme.bg;
+                            Rectangle {
+                                x: 2px;
+                                width: parent.width - 4px;
+                                height: (parent.height - 4px) * cards-page.per-page / cards-page.card-count;
+                                y: 2px + (cards-page.max-offset > 0 ? (parent.height - 4px - self.height) * cards-page.card-offset / cards-page.max-offset : 0);
+                                border-radius: self.width / 2;
+                                background: Theme.fg;
+                            }
+                        }
+                    }
+                }
+            }
+
+            Rectangle {
+                width: parent.width;
+                height: parent.height;
+                x: (3 - root.tab) * parent.width;
+
+                VerticalLayout {
+                    spacing: root.gap;
+
+                    HorizontalLayout {
+                        spacing: root.gap;
+                        Text {
+                            text: "Charts";
+                            font-family: "Liberation Sans";
+                            font-weight: 700;
+                            font-size: root.fs-h2;
+                            color: Theme.fg;
+                            vertical-alignment: center;
+                        }
+                        data := Slider {
+                            value: 50;
+                            height: root.width * 0.06;
+                            horizontal-stretch: 1;
+                        }
+                        Text {
+                            text: "\{round(data.value)}";
+                            font-family: "DejaVu Sans Mono";
+                            font-size: root.fs-body;
+                            color: Theme.fg;
+                            vertical-alignment: center;
+                            width: root.fs-body * 2.5;
+                            horizontal-alignment: right;
+                        }
+                    }
+
+                    Card {
+                        vertical-stretch: 1;
+                        VerticalLayout {
+                            padding: root.pad;
+                            spacing: root.gap;
+
+                            Text {
+                                text: "BARS — morph between two series";
+                                font-family: "DejaVu Sans Mono";
+                                font-size: root.fs-small;
+                                color: Theme.fg;
+                            }
+                            bars := Rectangle {
+                                vertical-stretch: 1;
+                                property <float> t: data.value / 100;
+                                for d[i] in [
+                                    { a: 0.45, b: 0.70 },
+                                    { a: 0.80, b: 0.30 },
+                                    { a: 0.35, b: 0.90 },
+                                    { a: 0.95, b: 0.40 },
+                                    { a: 0.60, b: 0.85 },
+                                    { a: 0.75, b: 0.25 },
+                                    { a: 0.50, b: 0.65 },
+                                ]: Rectangle {
+                                    property <length> slot: bars.width / 7;
+                                    width: self.slot * 0.66;
+                                    x: i * self.slot + self.slot * 0.17;
+                                    height: bars.height * (d.a + (d.b - d.a) * bars.t);
+                                    y: bars.height - self.height;
+                                    background: Theme.fg;
+                                    border-radius: 3px;
+                                }
+                            }
+                        }
+                    }
+
+                    HorizontalLayout {
+                        vertical-stretch: 1;
+                        spacing: root.gap;
+
+                        Card {
+                            horizontal-stretch: 3;
+                            VerticalLayout {
+                                padding: root.pad;
+                                spacing: root.gap;
+
+                                Text {
+                                    text: "LINE — sin(x + t)";
+                                    font-family: "DejaVu Sans Mono";
+                                    font-size: root.fs-small;
+                                    color: Theme.fg;
+                                }
+                                Path {
+                                    vertical-stretch: 1;
+                                    pure function wave(i: int) -> float {
+                                        return 20 - 14 * sin((i * 40 + data.value * 3.6) * 1deg);
+                                    }
+                                    viewbox-x: 0;
+                                    viewbox-y: 0;
+                                    viewbox-width: 100;
+                                    viewbox-height: 40;
+                                    commands: "M 0 \{self.wave(0)} L 10 \{self.wave(1)} L 20 \{self.wave(2)} L 30 \{self.wave(3)} L 40 \{self.wave(4)} L 50 \{self.wave(5)} L 60 \{self.wave(6)} L 70 \{self.wave(7)} L 80 \{self.wave(8)} L 90 \{self.wave(9)} L 100 \{self.wave(10)}";
+                                    stroke: Theme.fg;
+                                    stroke-width: 2px;
+                                    stroke-line-cap: round;
+                                    stroke-line-join: round;
+                                    fill: transparent;
+                                }
+                            }
+                        }
+
+                        Card {
+                            horizontal-stretch: 2;
+                            VerticalLayout {
+                                padding: root.pad;
+                                spacing: root.gap;
+
+                                Text {
+                                    text: "ARC — ArcTo";
+                                    font-family: "DejaVu Sans Mono";
+                                    font-size: root.fs-small;
+                                    color: Theme.fg;
+                                }
+                                donut := Rectangle {
+                                    vertical-stretch: 1;
+                                    property <length> size: min(self.width, self.height);
+                                    property <angle> sweep: min(data.value, 99.9) * 3.6deg;
+
+                                    Rectangle {
+                                        width: donut.size;
+                                        height: donut.size;
+                                        border-radius: self.width / 2;
+                                        border-width: 2px;
+                                        border-color: Theme.fg;
+                                    }
+                                    Rectangle {
+                                        width: donut.size * 0.8;
+                                        height: donut.size * 0.8;
+                                        border-radius: self.width / 2;
+                                        border-width: 2px;
+                                        border-color: Theme.fg;
+                                    }
+                                    Path {
+                                        width: donut.size;
+                                        height: donut.size;
+                                        viewbox-x: 0;
+                                        viewbox-y: 0;
+                                        viewbox-width: 100;
+                                        viewbox-height: 100;
+                                        stroke: Theme.fg;
+                                        stroke-width: donut.size * 0.1;
+                                        fill: transparent;
+                                        MoveTo { x: 50; y: 5; }
+                                        ArcTo {
+                                            x: 50 + 45 * sin(donut.sweep);
+                                            y: 50 - 45 * cos(donut.sweep);
+                                            radius-x: 45;
+                                            radius-y: 45;
+                                            large-arc: donut.sweep > 180deg;
+                                            sweep: true;
+                                        }
+                                    }
+                                    Text {
+                                        text: "\{round(data.value)}%";
+                                        font-family: "Liberation Sans";
+                                        font-weight: 700;
+                                        font-size: root.fs-h2;
+                                        color: Theme.fg;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            sketch-page := Rectangle {
+                width: parent.width;
+                height: parent.height;
+                x: (4 - root.tab) * parent.width;
+                property <string> ink;
+
+                VerticalLayout {
+                    spacing: root.gap;
+
+                    HorizontalLayout {
+                        spacing: root.gap;
+                        Text {
+                            text: "Sketch";
+                            font-family: "Liberation Sans";
+                            font-weight: 700;
+                            font-size: root.fs-h2;
+                            color: Theme.fg;
+                            horizontal-stretch: 1;
+                            vertical-alignment: center;
+                        }
+                        PillButton {
+                            text: "Clear";
+                            font-size: root.fs-body;
+                            width: root.width * 0.3;
+                            clicked => { sketch-page.ink = ""; }
+                        }
+                    }
+
+                    Card {
+                        vertical-stretch: 1;
+                        clip: true;
+
+                        Path {
+                            x: 0;
+                            y: 0;
+                            width: 100%;
+                            height: 100%;
+                            viewbox-x: 0;
+                            viewbox-y: 0;
+                            viewbox-width: self.width / 1px;
+                            viewbox-height: self.height / 1px;
+                            commands: sketch-page.ink;
+                            stroke: Theme.fg;
+                            stroke-width: root.width * 0.006;
+                            stroke-line-cap: round;
+                            stroke-line-join: round;
+                            fill: transparent;
+                        }
+
+                        Text {
+                            visible: sketch-page.ink == "";
+                            text: "draw here";
+                            font-family: "DejaVu Sans Mono";
+                            font-size: root.fs-body;
+                            color: Theme.fg;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+
+                        TouchArea {
+                            pointer-event(e) => {
+                                if (e.kind == PointerEventKind.down) {
+                                    sketch-page.ink += " M \{self.mouse-x / 1px} \{self.mouse-y / 1px}";
+                                }
+                            }
+                            moved => {
+                                sketch-page.ink += " L \{self.mouse-x / 1px} \{self.mouse-y / 1px}";
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Text {
+            text: "running on: " + root.platform-name;
+            font-family: "DejaVu Sans Mono";
+            font-size: root.fs-small;
+            color: Theme.fg;
+            horizontal-alignment: center;
+        }
+    }
+}
