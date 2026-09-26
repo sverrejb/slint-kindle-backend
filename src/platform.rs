@@ -319,18 +319,13 @@ fn rotated_size(fb: &Framebuffer, render_rotation: u32) -> slint::PhysicalSize {
 /// Devices with an accelerometer let the framework flip its UI 180° when
 /// held the other way up. Touch input then already arrives flipped, but the
 /// framebuffer does not, so rendering has to compensate by whatever the
-/// framework thinks is up when the app starts. Without the property the
-/// command fails and the offset is 0.
-///
-/// ponytail: one subprocess at loop start; turning the device while the app runs
-/// is not detected. Poll the accelerometer event node in the loop if needed.
+/// framework thinks is up when the app starts. 
 fn launch_render_offset() -> u32 {
     let flipped = std::process::Command::new("lipc-get-prop")
         .args(["com.lab126.winmgr", "accelerometer"])
         .output()
         .is_ok_and(|out| out.status.success() && out.stdout.trim_ascii() == b"D");
     if flipped {
-        log::info!("framework reports the device upside-down; rendering with a 180° offset");
         180
     } else {
         0
