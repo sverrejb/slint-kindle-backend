@@ -4111,7 +4111,6 @@ version = "0.6.0"
 dependencies = [
  "fontdb",
  "fontique",
- "image",
  "libc",
  "log",
  "slint",

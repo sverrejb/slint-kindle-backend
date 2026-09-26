@@ -2,8 +2,6 @@ use slint::LogicalPosition;
 use slint::platform::software_renderer::MinimalSoftwareWindow;
 use slint::platform::{PointerEventButton, WindowEvent};
 
-use crate::get_rotation;
-
 // Touchscreen driver event. Layout has to match exactly what the kernel writes.
 #[repr(C)]
 struct TouchInputEvent {
@@ -68,7 +66,8 @@ pub(crate) struct TouchInput {
     pressed: bool,
     screen_width: f32,
     screen_height: f32,
-    scale_factor: f32,
+    /// Rotation the panel is currently drawn with, handed over on each poll.
+    rotation: u32,
     /// Maximum raw X value reported by the touch controller (from EVIOCGABS).
     max_x: f32,
     /// Maximum raw Y value reported by the touch controller (from EVIOCGABS).
@@ -76,11 +75,7 @@ pub(crate) struct TouchInput {
 }
 
 impl TouchInput {
-    pub(crate) fn open(
-        screen_width: u32,
-        screen_height: u32,
-        scale_factor: f32,
-    ) -> std::io::Result<Self> {
+    pub(crate) fn open(screen_width: u32, screen_height: u32) -> std::io::Result<Self> {
         let path = Self::find_touch_device().ok_or_else(|| {
             std::io::Error::new(
                 std::io::ErrorKind::NotFound,
@@ -127,7 +122,7 @@ impl TouchInput {
             pressed: false,
             screen_width: screen_width as f32,
             screen_height: screen_height as f32,
-            scale_factor,
+            rotation: 0,
             max_x,
             max_y,
         })
@@ -181,19 +176,18 @@ impl TouchInput {
     }
 
     /// Read any waiting touch events and forward them to the window as pointer events.
-    pub(crate) fn poll(&mut self, window: &MinimalSoftwareWindow) {
-        let mut had_events = false;
+    pub(crate) fn poll(&mut self, window: &MinimalSoftwareWindow, rotation: u32) {
+        self.rotation = rotation;
         while let Some(event) = self.read_event() {
-            had_events = true;
             match (event.kind, event.code) {
                 (EVENT_ABSOLUTE_AXIS, TOUCH_SLOT) => {
                     self.active_slot = event.value;
                 }
                 (EVENT_ABSOLUTE_AXIS, TOUCH_POSITION_X) if self.is_tracked_slot() => {
-                    self.x = (event.value as f32) * self.screen_width / self.max_x / self.scale_factor;
+                    self.x = (event.value as f32) * self.screen_width / self.max_x;
                 }
                 (EVENT_ABSOLUTE_AXIS, TOUCH_POSITION_Y) if self.is_tracked_slot() => {
-                    self.y = (event.value as f32) * self.screen_height / self.max_y / self.scale_factor;
+                    self.y = (event.value as f32) * self.screen_height / self.max_y;
                 }
                 (EVENT_ABSOLUTE_AXIS, TOUCH_TRACKING_ID) => {
                     if event.value == -1 {
@@ -212,9 +206,6 @@ impl TouchInput {
                 (EVENT_SYNC, SYNC_REPORT) => self.commit(window),
                 _ => {}
             }
-        }
-        if had_events {
-            crate::touch_activity();
         }
     }
 
@@ -241,9 +232,8 @@ impl TouchInput {
             return;
         }
         self.pressed = false;
-        let (x, y) = self.rotated_position();
         let _ = window.dispatch_event_with_result(WindowEvent::PointerReleased {
-            position: LogicalPosition::new(x, y),
+            position: self.logical_position(),
             button: PointerEventButton::Left,
         });
     }
@@ -259,8 +249,7 @@ impl TouchInput {
         if self.tracked_slot.is_none() {
             return;
         }
-        let (x, y) = self.rotated_position();
-        let position = LogicalPosition::new(x, y);
+        let position = self.logical_position();
         let pointer_event = if self.pressed {
             WindowEvent::PointerMoved { position }
         } else {
@@ -273,28 +262,17 @@ impl TouchInput {
         let _ = window.dispatch_event_with_result(pointer_event);
     }
 
-    /// Transform self.x/self.y (in logical framebuffer coordinates) to
-    /// logical render coordinates based on the current rotation.
-    /// This is the exact inverse of write_row_rotated_range in platform.rs.
-    fn rotated_position(&self) -> (f32, f32) {
-        let rotation = get_rotation();
-        match rotation {
-            0 => (self.x, self.y),
-            180 => {
-                let lw = self.screen_width / self.scale_factor;
-                let lh = self.screen_height / self.scale_factor;
-                (lw - self.x, lh - self.y)
-            }
-            90 => {
-                let lh = self.screen_width / self.scale_factor;
-                (self.y, lh - self.x)
-            }
-            270 => {
-                let lw = self.screen_height / self.scale_factor;
-                (lw - self.y, self.x)
-            }
-            _ => (self.x, self.y),
-        }
+    /// Only the app's rotation is undone, not the launch offset: when the
+    /// framework has flipped the display it already flips touch but not pixels.
+    fn logical_position(&self) -> LogicalPosition {
+        let (x, y) = unrotate(
+            self.x,
+            self.y,
+            self.screen_width,
+            self.screen_height,
+            self.rotation,
+        );
+        LogicalPosition::new(x, y)
     }
 }
 
@@ -303,5 +281,33 @@ impl Drop for TouchInput {
         // Release the exclusive grab before closing
         unsafe { libc::ioctl(self.file_descriptor, EVIOCGRAB as _, 0 as libc::c_int) };
         unsafe { libc::close(self.file_descriptor) };
+    }
+}
+
+/// Slint rotates pixels on the way out but expects pointer events in the
+/// un-rotated logical frame, and it exposes no inverse of its rotation, so
+/// the mapping from panel pixel back to the app's frame has to live here.
+fn unrotate(x: f32, y: f32, panel_w: f32, panel_h: f32, rotation: u32) -> (f32, f32) {
+    match rotation {
+        90 => (y, panel_w - x),
+        180 => (panel_w - x, panel_h - y),
+        270 => (panel_h - y, x),
+        _ => (x, y),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::unrotate;
+
+    #[test]
+    fn unrotate_inverts_slints_rendering_rotation() {
+        // Inputs are where Slint's clockwise RenderingRotation puts app pixel
+        // (100, 300) on a portrait 1072x1448 panel.
+        let (w, h) = (1072.0, 1448.0);
+        assert_eq!(unrotate(100.0, 300.0, w, h, 0), (100.0, 300.0));
+        assert_eq!(unrotate(w - 300.0, 100.0, w, h, 90), (100.0, 300.0));
+        assert_eq!(unrotate(w - 100.0, h - 300.0, w, h, 180), (100.0, 300.0));
+        assert_eq!(unrotate(300.0, h - 100.0, w, h, 270), (100.0, 300.0));
     }
 }
