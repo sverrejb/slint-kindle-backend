@@ -13,7 +13,7 @@ use crate::framebuffer::Framebuffer;
 use crate::power::{arm_wakealarm, find_wakealarm, suspend_to_mem};
 use crate::touch::TouchInput;
 use crate::wakeup::{self, KindleEventLoopProxy, Queue, Wakeup};
-use crate::{OnWakeCallback, WakeSchedule};
+use crate::{OnWakeCallback, WakeSchedule, REQUEST_FULL_REFRESH, WOKE_FROM_SUSPEND, get_rotation, get_render_offset};
 
 // Animations get redrawn at most ~30 fps. E-ink can't keep up with anything
 // faster, so quicker wakes would just waste battery.
@@ -28,6 +28,7 @@ pub(crate) struct KindlePlatform {
     pub(crate) wake_schedule: Arc<Mutex<Option<WakeSchedule>>>,
     pub(crate) on_wake: OnWakeCallback,
     black_and_white: Arc<AtomicBool>,
+    scale_factor: f32,
 }
 
 impl KindlePlatform {
@@ -35,6 +36,7 @@ impl KindlePlatform {
         wake_schedule: Arc<Mutex<Option<WakeSchedule>>>,
         on_wake: OnWakeCallback,
         black_and_white: Arc<AtomicBool>,
+        scale_factor: f32,
     ) -> std::io::Result<Self> {
         let window = MinimalSoftwareWindow::new(RepaintBufferType::ReusedBuffer);
         let wakeup = wakeup::make_wakeup()?;
@@ -47,6 +49,7 @@ impl KindlePlatform {
             wake_schedule,
             on_wake,
             black_and_white,
+            scale_factor,
         })
     }
 
@@ -125,20 +128,37 @@ impl Platform for KindlePlatform {
         let mut frame_buffer = Framebuffer::open()
             .map_err(|e| PlatformError::Other(format!("failed to open /dev/fb0: {e}")))?;
 
-        self.window.set_size(slint::PhysicalSize::new(
-            frame_buffer.width,
-            frame_buffer.height,
-        ));
+        let sf = self.scale_factor;
+        let fb_w = frame_buffer.width as usize;
+        let fb_h = frame_buffer.height as usize;
 
-        let mut touch_input = TouchInput::open(frame_buffer.width, frame_buffer.height)
+        // Read rotation and compute effective render dimensions.
+        // For 0°/180°: render at framebuffer native size (portrait).
+        // For 90°/270°: render at swapped size (landscape) so Slint lays
+        // out the UI in landscape, then we transpose when writing to fb.
+        let rotation = get_rotation();
+        let (render_w, render_h) = match rotation {
+            90 | 270 => (fb_h, fb_w),
+            _ => (fb_w, fb_h),
+        };
+
+        self.window
+            .set_size(slint::PhysicalSize::new(render_w as u32, render_h as u32));
+
+        let mut touch_input = TouchInput::open(frame_buffer.width, frame_buffer.height, sf)
             .map_err(|e| PlatformError::Other(format!("failed to open touch input: {e}")))?;
 
         frame_buffer.fill(0xff);
         frame_buffer.refresh_full();
 
-        let width = frame_buffer.width as usize;
-        let mut rgb_buffer = vec![Rgb8Pixel::default(); width * frame_buffer.height as usize];
+        let width = render_w;
+        let mut rgb_buffer = vec![Rgb8Pixel::default(); width * render_h];
         let mut gray_buffer = vec![0u8; width];
+
+        // Track the rotation used for the last full render. When the rotation
+        // changes at runtime, we must re-render the entire screen (not just
+        // dirty regions) because every pixel's framebuffer position changes.
+        let mut last_rendered_rotation = (rotation + get_render_offset()) % 360;
 
         let wakeup_read_fd = self.wakeup.read.as_raw_fd();
 
@@ -238,15 +258,39 @@ impl Platform for KindlePlatform {
             slint::platform::update_timers_and_animations();
 
             let black_and_white = self.black_and_white.load(Ordering::Relaxed);
+            let full_refresh = REQUEST_FULL_REFRESH.swap(false, Ordering::Relaxed);
+
+            // Apply the fixed render offset for this session.
+            // On the Kindle Oasis, the framebuffer's hardware rotation is
+            // set by the framework before we take over. If we launched at
+            // 180°, the fb is already rotated, so we add 180° to every
+            // render. This offset is fixed at launch and never changes.
+            let current_rotation = get_rotation();
+            let render_rotation = (current_rotation + get_render_offset()) % 360;
+            let rotation_changed = render_rotation != last_rendered_rotation;
+            if rotation_changed {
+                last_rendered_rotation = render_rotation;
+                self.window.request_redraw();
+            }
+
+            // After wake from suspend, force a redraw so the stale sleep
+            // image is replaced with fresh app content.
+            if WOKE_FROM_SUSPEND.swap(false, Ordering::Relaxed) {
+                self.window.request_redraw();
+            }
+
+            let mut did_draw = false;
             self.window.draw_if_needed(|renderer| {
+                did_draw = true;
                 let dirty = renderer.render(&mut rgb_buffer, width);
                 let origin = dirty.bounding_box_origin();
                 let size = dirty.bounding_box_size();
                 let (x0, y0) = (origin.x as usize, origin.y as usize);
                 let (w, h) = (size.width as usize, size.height as usize);
+                if w == 0 || h == 0 {
+                    return;
+                }
 
-                // The E-ink screen only shows grayscale, so turn each RGB pixel into a single gray value.
-                // BT.601 luma weights (0.299, 0.587, 0.114) scaled by 256 and bitshifted to devide by 256.
                 let gray = &mut gray_buffer[..w];
                 for row in 0..h {
                     let start = (y0 + row) * width + x0;
@@ -254,17 +298,61 @@ impl Platform for KindlePlatform {
                     for (g, p) in gray.iter_mut().zip(rgb.iter()) {
                         let value =
                             ((77 * p.r as u32 + 150 * p.g as u32 + 29 * p.b as u32) >> 8) as u8;
-                        // Black-and-white mode forces pure black/white based on threshold
                         *g = if black_and_white {
                             if value < 128 { 0x00 } else { 0xff }
                         } else {
                             value
                         };
                     }
-                    frame_buffer.write_line(y0 + row, x0..x0 + w, gray);
+                    write_row_rotated_range(
+                        &mut frame_buffer, y0 + row, x0, &gray, render_rotation,
+                        fb_w, fb_h, render_w, render_h,
+                    );
                 }
-                frame_buffer.refresh_region(origin, size);
+
+                // full_reblit below will call refresh_full() for the
+                // full_refresh/rotation_changed cases, so only do a partial
+                // refresh here when those aren't active.
+                if !full_refresh && !rotation_changed {
+                    let (fb_origin, fb_size) = match render_rotation {
+                        180 => {
+                            let fb_x0 = fb_w.saturating_sub(x0 + w);
+                            let fb_y0 = fb_h - 1 - (y0 + h - 1);
+                            (
+                                slint::PhysicalPosition::new(fb_x0 as i32, fb_y0 as i32),
+                                slint::PhysicalSize::new(w as u32, h as u32),
+                            )
+                        }
+                        90 => {
+                            let fb_x0 = fb_w - 1 - (y0 + h - 1);
+                            let fb_y0 = x0;
+                            (
+                                slint::PhysicalPosition::new(fb_x0 as i32, fb_y0 as i32),
+                                slint::PhysicalSize::new(h as u32, w as u32),
+                            )
+                        }
+                        270 => {
+                            let fb_x0 = y0;
+                            let fb_y0 = fb_h - 1 - (x0 + w - 1);
+                            (
+                                slint::PhysicalPosition::new(fb_x0 as i32, fb_y0 as i32),
+                                slint::PhysicalSize::new(h as u32, w as u32),
+                            )
+                        }
+                        _ => (origin, size),
+                    };
+                    frame_buffer.refresh_region(fb_origin, fb_size);
+                }
             });
+
+            // If a full refresh was requested or rotation changed, force a
+            // full reblit. draw_if_needed only writes the DIRTY region to the
+            // framebuffer — the rest would keep stale content (e.g. the sleep
+            // image after wake). full_reblit writes the entire rgb_buffer.
+            if full_refresh || rotation_changed {
+                full_reblit(&mut frame_buffer, &rgb_buffer, &mut gray_buffer,
+                    black_and_white, render_rotation, fb_w, fb_h, render_w, render_h);
+            }
         }
 
         Ok(())
@@ -275,4 +363,88 @@ fn duration_to_ms(d: Duration) -> libc::c_int {
     // Round up to at least 1 ms. A timeout of 0 makes poll skip the wait
     // entirely, which would spin the CPU if a tiny timer kept re-firing.
     d.as_millis().clamp(1, libc::c_int::MAX as u128) as libc::c_int
+}
+
+// ---------------------------------------------------------------------------
+// Rotation helpers
+// ---------------------------------------------------------------------------
+
+/// Write the entire render buffer to the framebuffer with the given rotation,
+/// converting RGB to grayscale, then do a full refresh.
+///
+/// Used after rotation changes (every pixel's framebuffer position changes)
+/// and after waking from suspend (framebuffer has stale sleep image).
+fn full_reblit(
+    fb: &mut Framebuffer,
+    rgb_buffer: &[Rgb8Pixel],
+    gray_buffer: &mut [u8],
+    black_and_white: bool,
+    rotation: u32,
+    fb_w: usize,
+    fb_h: usize,
+    render_w: usize,
+    render_h: usize,
+) {
+    let width = render_w;
+    let gray = &mut gray_buffer[..width];
+    for row in 0..render_h {
+        let rgb = &rgb_buffer[row * width..(row + 1) * width];
+        for (g, p) in gray.iter_mut().zip(rgb.iter()) {
+            let value = ((77 * p.r as u32 + 150 * p.g as u32 + 29 * p.b as u32) >> 8) as u8;
+            *g = if black_and_white {
+                if value < 128 { 0x00 } else { 0xff }
+            } else {
+                value
+            };
+        }
+        write_row_rotated_range(fb, row, 0, gray, rotation, fb_w, fb_h, render_w, render_h);
+    }
+    fb.refresh_full();
+}
+
+/// Write a partial row (range x0..x0+len) to the framebuffer with rotation.
+/// `pixels` contains only the dirty range, not the full row.
+fn write_row_rotated_range(
+    fb: &mut Framebuffer,
+    row: usize,
+    x0: usize,
+    pixels: &[u8],
+    rotation: u32,
+    fb_w: usize,
+    fb_h: usize,
+    render_w: usize,
+    render_h: usize,
+) {
+    let _ = (render_w, render_h);
+    let len = pixels.len();
+    match rotation {
+        0 => {
+            fb.write_line(row, x0..x0 + len, pixels);
+        }
+        180 => {
+            let fb_row = fb_h - 1 - row;
+            let fb_x0 = fb_w.saturating_sub(x0 + len);
+            let mut reversed = pixels.to_vec();
+            reversed.reverse();
+            fb.write_line(fb_row, fb_x0..fb_x0 + len, &reversed);
+        }
+        90 => {
+            let fb_x = fb_w - 1 - row;
+            for (i, &val) in pixels.iter().enumerate() {
+                let rx = x0 + i;
+                fb.write_pixel(fb_x, rx, val);
+            }
+        }
+        270 => {
+            let fb_x = row;
+            for (i, &val) in pixels.iter().enumerate() {
+                let rx = x0 + i;
+                let fb_y = fb_h - 1 - rx;
+                fb.write_pixel(fb_x, fb_y, val);
+            }
+        }
+        _ => {
+            fb.write_line(row, x0..x0 + len, pixels);
+        }
+    }
 }
