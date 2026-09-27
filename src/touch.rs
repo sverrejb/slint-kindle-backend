@@ -16,6 +16,8 @@ struct TouchInputEvent {
 const EVENT_SYNC: u16 = 0;
 const EVENT_ABSOLUTE_AXIS: u16 = 3;
 const SYNC_REPORT: u16 = 0;
+const SINGLE_TOUCH_POSITION_X: u16 = 0x00;
+const PRESSURE_AXIS: u16 = 0x18;
 const TOUCH_SLOT: u16 = 0x2f;
 const TOUCH_POSITION_X: u16 = 0x35;
 const TOUCH_POSITION_Y: u16 = 0x36;
@@ -265,7 +267,7 @@ impl TouchInput {
     /// Only the app's rotation is undone, not the launch offset: when the
     /// framework has flipped the display it already flips touch but not pixels.
     fn logical_position(&self) -> LogicalPosition {
-        let (x, y) = unrotate(
+        let (x, y) = undo_rotation(
             self.x,
             self.y,
             self.screen_width,
@@ -284,30 +286,77 @@ impl Drop for TouchInput {
     }
 }
 
+pub(crate) fn has_accelerometer() -> bool {
+    std::fs::read_to_string("/proc/bus/input/devices")
+        .is_ok_and(|devices| lists_accelerometer(&devices))
+}
+
+fn lists_accelerometer(proc_devices: &str) -> bool {
+    proc_devices
+        .lines()
+        .filter_map(|line| line.strip_prefix("B: ABS="))
+        .any(|hex_words| {
+            let axes = hex_words.split_whitespace().fold(0u64, |axes, word| {
+                axes << 32 | u64::from_str_radix(word, 16).unwrap_or(0)
+            });
+            let reports = |axis: u16| axes & (1 << axis) != 0;
+            reports(PRESSURE_AXIS)
+                && !reports(SINGLE_TOUCH_POSITION_X)
+                && !reports(TOUCH_POSITION_X)
+        })
+}
+
 /// Slint rotates pixels on the way out but expects pointer events in the
 /// un-rotated logical frame, and it exposes no inverse of its rotation, so
 /// the mapping from panel pixel back to the app's frame has to live here.
-fn unrotate(x: f32, y: f32, panel_w: f32, panel_h: f32, rotation: u32) -> (f32, f32) {
+fn undo_rotation(x: f32, y: f32, panel_width: f32, panel_height: f32, rotation: u32) -> (f32, f32) {
     match rotation {
-        90 => (y, panel_w - x),
-        180 => (panel_w - x, panel_h - y),
-        270 => (panel_h - y, x),
+        90 => (y, panel_width - x),
+        180 => (panel_width - x, panel_height - y),
+        270 => (panel_height - y, x),
         _ => (x, y),
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::unrotate;
+    use super::{lists_accelerometer, undo_rotation};
 
     #[test]
-    fn unrotate_inverts_slints_rendering_rotation() {
+    fn undo_rotation_inverts_slints_rendering_rotation() {
         // Inputs are where Slint's clockwise RenderingRotation puts app pixel
         // (100, 300) on a portrait 1072x1448 panel.
-        let (w, h) = (1072.0, 1448.0);
-        assert_eq!(unrotate(100.0, 300.0, w, h, 0), (100.0, 300.0));
-        assert_eq!(unrotate(w - 300.0, 100.0, w, h, 90), (100.0, 300.0));
-        assert_eq!(unrotate(w - 100.0, h - 300.0, w, h, 180), (100.0, 300.0));
-        assert_eq!(unrotate(300.0, h - 100.0, w, h, 270), (100.0, 300.0));
+        let (panel_width, panel_height) = (1072.0, 1448.0);
+        assert_eq!(
+            undo_rotation(100.0, 300.0, panel_width, panel_height, 0),
+            (100.0, 300.0)
+        );
+        assert_eq!(
+            undo_rotation(panel_width - 300.0, 100.0, panel_width, panel_height, 90),
+            (100.0, 300.0)
+        );
+        assert_eq!(
+            undo_rotation(
+                panel_width - 100.0,
+                panel_height - 300.0,
+                panel_width,
+                panel_height,
+                180
+            ),
+            (100.0, 300.0)
+        );
+        assert_eq!(
+            undo_rotation(300.0, panel_height - 100.0, panel_width, panel_height, 270),
+            (100.0, 300.0)
+        );
+    }
+
+    #[test]
+    fn accelerometer_is_a_pressure_only_device() {
+        assert!(lists_accelerometer("B: ABS=1000000\n"));
+        // Touchscreen: pressure plus multitouch positions.
+        assert!(!lists_accelerometer("B: ABS=260000 1000000\n"));
+        // Pen: pressure plus x/y.
+        assert!(!lists_accelerometer("B: ABS=1000003\n"));
     }
 }
