@@ -15,6 +15,7 @@ Slint backend for jailbroken Kindles. Allows for running Slint GUIS on Kindle de
 * **Suspend-and-wake cycle**: lets the device sleep between periodic display updates. Useful for long battery life applications.
 * **E-ink rendering via the EPDC driver**: No dependency on X11 etc.
 * **Pure black & white (bilevel) mode**: optional flicker-free rendering, so flicker less. Great for high-interaction UIs.
+* **Rotation**: 0/90/180/270° with touch mapped to match; launch orientation is compensated on devices with an accelerometer.
 
 ## Usage and configuration
 
@@ -138,6 +139,24 @@ Buttons, toggles, drawing, and anything that redraws on touch update instantly w
 The trade-off is no anti-aliasing: text edges and thin strokes get harder/blockier, and any light grey is pushed to white (so it disappears). If you want to use this mode you should design for it: Use solid black and white.
 
 <sup>*</sup>That is, at least on the author's device. This might vary between models.
+
+### Rotation
+
+Kindle panels are by default in portrait orientation. To go landscape, or upside down, rotate it on the backend:
+
+```rust
+fn main() {
+    let backend = slint_backend_kindle::install(FONT)
+        .expect("failed to install Kindle backend");
+    backend.set_rotation(90); 
+
+    let app = AppWindow::new().expect("failed to create window");
+    app.run().expect("event loop error");
+}
+```
+
+`set_rotation` takes 0, 90, 180 or 270 degrees clockwise and can be changed at runtime; the panel does a full flash to clear ghosting. Rotation is relative to *upright as the device was held at launch*: on devices with an accelerometer the display may be flipped when the app starts, the backend should ask it which way up it is and compensate, so apps don't need to. This is not thorougly tested, PR's and issues are welcome! _Rotating the app when the device is rotated is currently not supported.__
+
 
 ## Cross-compiling for the Kindle
 
